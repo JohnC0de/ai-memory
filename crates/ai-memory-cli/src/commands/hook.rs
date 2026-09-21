@@ -54,6 +54,7 @@ const BACKGROUND_DRAIN_BUDGET_ENV: &str = "AI_MEMORY_HOOK_BACKGROUND_DRAIN_BUDGE
 
 const INCREMENTAL_THRESHOLD_ENV: &str = "AI_MEMORY_HOOK_INCREMENTAL_THRESHOLD";
 const MANAGED_RUN_ENV: &str = "AI_MEMORY_RUN_ID";
+const CAPTURE_OWNER_ENV: &str = "AI_MEMORY_CAPTURE_OWNER";
 /// Backlog size at which `post-tool-use` does a mid-session catch-up drain, so a
 /// light session pays only a `read_dir`. Override via the env var above.
 const DEFAULT_INCREMENTAL_THRESHOLD: usize = 32;
@@ -508,6 +509,21 @@ where
 {
     let agent_kind = AgentKind::from_wire(&args.agent);
     let hook_event = HookEvent::parse(&args.event);
+    // This is inherited execution context, like AI_MEMORY_RUN_ID, rather
+    // than server configuration. Hooks deliberately bypass Config::load.
+    let external_capture = env_lookup(CAPTURE_OWNER_ENV).is_some_and(|v| !v.trim().is_empty());
+    let delivers_context = (hook_event == HookEvent::SessionStart
+        && agent_kind.session_start_injects_handoff())
+        || (hook_event == HookEvent::UserPrompt && agent_kind.user_prompt_injects_handoff());
+    if external_capture && !args.check_capture && !delivers_context {
+        // Retiring the fallback session ID is lifecycle housekeeping, not
+        // capture. Preserve it even when no event is enqueued.
+        if agent_kind == AgentKind::Devin && hook_event == HookEvent::SessionEnd {
+            clear_session_id(&resolve_data_dir(data_dir.as_deref()), agent_kind);
+        }
+        write_success_response(stdout, agent_kind, hook_event)?;
+        return Ok(());
+    }
     let (mut payload, mut json) = match parse_hook_payload(payload) {
         Ok(parsed) => parsed,
         Err(_) => {
@@ -582,7 +598,8 @@ where
         let output = serde_json::json!({
             "capture_mode": capture_mode,
             "marker_present": marker_present,
-            "admits_capture": admits_capture,
+            "admits_capture": admits_capture && !external_capture,
+            "external_capture": external_capture,
             "version": protocol.map_or(1, |protocol| protocol.version()),
             "policy_state": protocol.map_or(PolicyState::Inactive, |protocol| protocol.policy_state()),
             "tool_family": protocol.map_or(ai_memory_hooks::ToolFamily::Unknown, |protocol| protocol.tool_family()),
@@ -672,67 +689,72 @@ where
     // atomically with the observation row and skips replays whose previous
     // delivery succeeded but whose response was lost — closing the
     // conservative-retry duplication vector. Older servers ignore the param.
-    let ingest_key = uuid::Uuid::new_v4().simple().to_string();
-    let event_url = format!(
-        "{base}/hook?event={}&agent={}{}{}&ingest_key={ingest_key}",
-        args.event, args.agent, hook_qs, capture_qs
-    );
-    let entry = hook_spool::entry_for(event_url, payload.clone(), effective_token, oidc_present);
-    if hook_spool::enqueue(&spool, &entry).is_err() {
-        eprintln!(
-            "ai-memory hook warning: failed to spool lifecycle event; capture for this event was skipped"
+    if !external_capture {
+        let ingest_key = uuid::Uuid::new_v4().simple().to_string();
+        let event_url = format!(
+            "{base}/hook?event={}&agent={}{}{}&ingest_key={ingest_key}",
+            args.event, args.agent, hook_qs, capture_qs
         );
-    }
-    // ZCode is intentionally absent here: it has no SessionEnd and fires Stop
-    // per turn, so its stored id is cleared by `finalize-session` (or
-    // overwritten by the next session-start), never by a hook event.
-    if AgentKind::from_wire(&args.agent) == AgentKind::Devin && args.event == "session-end" {
-        clear_session_id(&dd, AgentKind::Devin);
-    }
+        let entry =
+            hook_spool::entry_for(event_url, payload.clone(), effective_token, oidc_present);
+        if hook_spool::enqueue(&spool, &entry).is_err() {
+            eprintln!(
+                "ai-memory hook warning: failed to spool lifecycle event; capture for this event was skipped"
+            );
+        }
+        // ZCode is intentionally absent here: it has no SessionEnd and fires Stop
+        // per turn, so its stored id is cleared by `finalize-session` (or
+        // overwritten by the next session-start), never by a hook event.
+        if AgentKind::from_wire(&args.agent) == AgentKind::Devin && args.event == "session-end" {
+            clear_session_id(&dd, AgentKind::Devin);
+        }
 
-    // Mid-session catch-up: per-event hooks only enqueue, so a heavy session
-    // outpaces the boundary-only drain and the spool grows until the next
-    // boundary. On `post-tool-use`, once the backlog crosses the threshold, do a
-    // tightly time-boxed drain (budget == per-event timeout, sub-second) so the
-    // spool stays flat without ever stalling a tool call.
-    if should_incremental_drain(
-        &args.event,
-        hook_spool::spool_len(&spool),
-        incremental_drain_threshold(),
-    ) {
-        let _ = hook_spool::drain_exclusive(
-            &spool,
-            &dd,
-            INCREMENTAL_DRAIN_BUDGET,
-            INCREMENTAL_DRAIN_BUDGET,
-            hook_spool::DrainLockWait::NoWait,
-        )
-        .await;
-    }
+        // Mid-session catch-up: per-event hooks only enqueue, so a heavy session
+        // outpaces the boundary-only drain and the spool grows until the next
+        // boundary. On `post-tool-use`, once the backlog crosses the threshold, do a
+        // tightly time-boxed drain (budget == per-event timeout, sub-second) so the
+        // spool stays flat without ever stalling a tool call.
+        if should_incremental_drain(
+            &args.event,
+            hook_spool::spool_len(&spool),
+            incremental_drain_threshold(),
+        ) {
+            let _ = hook_spool::drain_exclusive(
+                &spool,
+                &dd,
+                INCREMENTAL_DRAIN_BUDGET,
+                INCREMENTAL_DRAIN_BUDGET,
+                hook_spool::DrainLockWait::NoWait,
+            )
+            .await;
+        }
 
-    // session-start: if this checkout has never had the one-time boot backfill
-    // attempted, spawn it detached. It self-gates (config opt-out, empty-store
-    // check) and records the attempt, so this is at most one extra process the
-    // first time a project is opened after installing hooks — never inline, so
-    // the SessionStart budget is untouched. Best-effort; a spawn failure must
-    // not affect session start.
-    if args.event == "session-start"
-        && let Ok(trigger_cwd) = std::env::current_dir()
-        && !super::backfill::sentinel_path(&dd, &trigger_cwd).exists()
-    {
-        let _ = hook_drain_process::spawn_backfill(&dd);
+        // session-start: if this checkout has never had the one-time boot backfill
+        // attempted, spawn it detached. It self-gates (config opt-out, empty-store
+        // check) and records the attempt, so this is at most one extra process the
+        // first time a project is opened after installing hooks — never inline, so
+        // the SessionStart budget is untouched. Best-effort; a spawn failure must
+        // not affect session start.
+        if args.event == "session-start"
+            && let Ok(trigger_cwd) = std::env::current_dir()
+            && !super::backfill::sentinel_path(&dd, &trigger_cwd).exists()
+        {
+            let _ = hook_drain_process::spawn_backfill(&dd);
+        }
     }
 
     // session-start: drain any backlog (e.g. from a previous session that ended
     // abruptly), then fetch + inject the pending handoff for the resuming agent.
     if args.event == "session-start" {
-        let _ = hook_spool::drain_exclusive_within_budget(
-            &spool,
-            &dd,
-            start_drain_budget(),
-            drain_event_timeout(),
-        )
-        .await;
+        if !external_capture {
+            let _ = hook_spool::drain_exclusive_within_budget(
+                &spool,
+                &dd,
+                start_drain_budget(),
+                drain_event_timeout(),
+            )
+            .await;
+        }
         // Only fetch the handoff for agents that inject the session-start
         // hook's stdout as context. Grok ignores it, so fetching here would
         // consume the handoff server-side (the GET is destructive) and then
@@ -844,7 +866,8 @@ where
     // to flush the shared spool. `session-end` remains the primary close path,
     // but `stop` and `pre-compact` also trigger the helper so delivery does not
     // rely on the single hook most likely to be cancelled during agent shutdown.
-    if should_spawn_background_drainer(&args.event)
+    if !external_capture
+        && should_spawn_background_drainer(&args.event)
         && let Err(err) = after_background_drain_event_enqueue(
             &dd,
             // The hook's own token, resolved the same way it authenticates
@@ -2305,6 +2328,7 @@ mod tests {
                 "admits_capture",
                 "capture_mode",
                 "disposition",
+                "external_capture",
                 "extraction_state",
                 "marker_present",
                 "path_count",

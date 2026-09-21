@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added per-execution `AI_MEMORY_CAPTURE_OWNER` context for external lifecycle
+  producers. Updated native hooks, script bundles and generated integrations
+  suppress capture while preserving supported handoff delivery and MCP recall.
+  Documented producer provenance and stable retries through the existing hook
+  ingestion API, without changing its schema or standalone defaults. (#821)
+
 ### Security
 - Bumped `rmcp` to 2.x (2.2.0), resolving three MCP transport advisories:
   GHSA-9pj6-vhgr-3mwh (unauthenticated Streamable-HTTP session-table leak /

@@ -288,6 +288,14 @@ function Test-AiMemoryAntigravityInitialInvocation {
     }
 }
 
+# Parity with `ai_memory_capture_owned_externally` in hooks/_lib.sh:
+# AI_MEMORY_CAPTURE_OWNER names an external producer of this session's capture
+# events. Non-blank claims ownership; unset, empty and whitespace-only keep
+# capture on. The value is only ever tested, never written to output.
+function Test-AiMemoryCaptureOwnedExternally {
+    return (-not [string]::IsNullOrWhiteSpace($env:AI_MEMORY_CAPTURE_OWNER))
+}
+
 function Invoke-AiMemoryHook {
     param(
         [Parameter(Mandatory = $true)] [string] $Event,
@@ -331,17 +339,22 @@ function Invoke-AiMemoryHook {
         $Headers["Authorization"] = "Bearer $env:AI_MEMORY_AUTH_TOKEN"
     }
 
-    $BodyBytes = [Text.Encoding]::UTF8.GetBytes($Payload)
-    try {
-        Invoke-WebRequest `
-            -UseBasicParsing `
-            -TimeoutSec 3 `
-            -Method Post `
-            -Uri "$Server/hook?event=$Event&agent=$Agent$QS$SessionQS" `
-            -Headers $Headers `
-            -ContentType "application/json; charset=utf-8" `
-            -Body $BodyBytes | Out-Null
-    } catch {
+    # This POST is the only producer on this path (no spool, no drain here).
+    # Session identity and the handoff/briefing GET below are delivery, so an
+    # external owner leaves them, and the stdout contract, alone.
+    if (-not (Test-AiMemoryCaptureOwnedExternally)) {
+        $BodyBytes = [Text.Encoding]::UTF8.GetBytes($Payload)
+        try {
+            Invoke-WebRequest `
+                -UseBasicParsing `
+                -TimeoutSec 3 `
+                -Method Post `
+                -Uri "$Server/hook?event=$Event&agent=$Agent$QS$SessionQS" `
+                -Headers $Headers `
+                -ContentType "application/json; charset=utf-8" `
+                -Body $BodyBytes | Out-Null
+        } catch {
+        }
     }
     if ($Agent -eq "devin" -and $Event -eq "session-end") {
         Clear-AiMemorySessionId -Agent $Agent
