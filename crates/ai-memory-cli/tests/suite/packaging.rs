@@ -1967,8 +1967,11 @@ fn pre_push_hook_replaces_crlf_markers_and_stale_block_in_place() {
     std::fs::write(&fixture.hook, format!("{before}# >>> ai-memory pre-push >>>\r\necho stale-block\r\n# <<< ai-memory pre-push <<<\r\n{after}")).unwrap();
     fixture.install_hook();
     let installed = std::fs::read_to_string(&fixture.hook).unwrap();
-    assert!(installed.starts_with(before));
-    assert!(installed.ends_with(after));
+    assert!(
+        installed.starts_with(before),
+        "changed prefix: {installed:?}"
+    );
+    assert!(installed.ends_with(after), "changed suffix: {installed:?}");
     assert!(!installed.contains("stale-block"));
     assert!(installed.contains("git rev-parse --local-env-vars"));
     fixture.install_hook();

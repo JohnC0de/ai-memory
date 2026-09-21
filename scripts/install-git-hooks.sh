@@ -79,8 +79,8 @@ fi
 mkdir -p "${hook%/*}"
 tmp=$(mktemp "${hook}.XXXXXX")
 if [[ "$has_content" -eq 1 ]]; then
-    # ENVIRON preserves the block's backslashes; awk -v would interpret them.
-    if ! AI_MEMORY_PRE_PUSH_BLOCK="$managed_block" awk -v begin="$begin" -v end="$end" '
+    # ENVIRON preserves backslashes; BINMODE prevents Windows CRLF translation.
+    if ! AI_MEMORY_PRE_PUSH_BLOCK="$managed_block" awk -v BINMODE=3 -v begin="$begin" -v end="$end" '
         {
             marker = $0
             sub(/\r$/, "", marker)
