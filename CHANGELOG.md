@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Grok Build CLI shows a pending handoff, and an opted-in `[briefing]`,
+  as `PostToolUse` `additionalContext` on the first tool of a session.
+  `SessionStart` and `UserPromptSubmit` still do not accept the handoff:
+  Grok discards that stdout. A session that never calls a tool leaves the
+  handoff open for `memory_handoff_accept`. The note is clipped to 10,000
+  characters, which is Grok's own cap.
+
 ### Security
 - Bumped `rmcp` to 2.x (2.2.0), resolving three MCP transport advisories:
   GHSA-9pj6-vhgr-3mwh (unauthenticated Streamable-HTTP session-table leak /
