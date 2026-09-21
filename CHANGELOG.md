@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected. (#794)
 
 ### Added
+- Builtin `/web` login and change-password pages for human password sessions:
+  unauthenticated browser GETs to the wiki redirect to `{web_slug}/login`
+  (not bare JSON 401), forms call existing `POST /auth/login` /
+  `/auth/password` / `/auth/logout`, and `--web-ui-dir` custom SPAs stay
+  unchanged. (#811)
 - macOS menu bar companion (`companions/ai-memory-macos`) that bundles the
   `ai-memory` binary and `hooks/` tree, governs the existing LaunchAgent, and
   opens the built-in web UI, `ai-memory status`, `config.toml`, the data
