@@ -765,12 +765,12 @@ where
         }
     }
 
-    // user-prompt: agents whose SessionStart stdout is discarded (Kimi Code)
-    // receive the handoff here instead — kimi injects UserPromptSubmit stdout
-    // into the turn verbatim as a `hook_result` user message. The payload
-    // carries the native session id when available, so the destructive GET
-    // can also link the managed run to the native session, same as
-    // session-start does.
+    // user-prompt: agents whose SessionStart stdout is discarded AND whose
+    // UserPromptSubmit stdout is injected (Kimi Code) receive the handoff
+    // here. Grok discards both, so it must not take this path: the GET
+    // accepts the handoff. The payload carries the native session id when
+    // available, so the destructive GET can also link the managed run to the
+    // native session, same as session-start does.
     // The installed kimi hook passes the script stem (`user-prompt-submit`)
     // while the legacy shell path posts `user-prompt`; HookEvent::parse
     // canonicalizes both (and the snake/native spellings) to UserPrompt.
@@ -2427,6 +2427,19 @@ mod tests {
         }
     }
 
+    fn grok_hook_args(event: &str, server_url: &str) -> HookArgs {
+        HookArgs {
+            event: event.into(),
+            agent: "grok".into(),
+            server_url: server_url.into(),
+            auth_token: None,
+            project_strategy: None,
+            check_capture: false,
+            capture_assistant: false,
+            capture_mode: None,
+        }
+    }
+
     fn kimi_hook_args(event: &str, server_url: &str) -> HookArgs {
         HookArgs {
             event: event.into(),
@@ -2903,6 +2916,91 @@ mod tests {
         assert!(request.starts_with("GET /handoff?"), "{request}");
         assert!(!request.contains("briefing"), "{request}");
         assert!(!data_dir.join("briefed").exists());
+    }
+
+    #[tokio::test]
+    async fn grok_session_start_never_fetches_the_handoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
+        let mut stdout = Vec::new();
+        run_with_payload(
+            Some(tmp.path().to_path_buf()),
+            grok_hook_args("session-start", &base),
+            serde_json::json!({"session_id": "grok-session", "cwd": tmp.path()}).to_string(),
+            &mut stdout,
+            |_, _| Ok(()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stdout, b"{}\n");
+        while let Some(request) = first_request(&mut requests).await {
+            assert!(!request.starts_with("GET /handoff"), "{request}");
+        }
+    }
+
+    #[tokio::test]
+    async fn grok_user_prompt_does_not_fetch_the_handoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
+        let mut stdout = Vec::new();
+        run_with_payload(
+            Some(tmp.path().to_path_buf()),
+            grok_hook_args("user-prompt", &base),
+            serde_json::json!({
+                "session_id": "grok-session",
+                "cwd": tmp.path(),
+                "prompt": "hello"
+            })
+            .to_string(),
+            &mut stdout,
+            |_, _| Ok(()),
+        )
+        .await
+        .unwrap();
+
+        // Grok discards allowing UserPromptSubmit stdout. Fetching would
+        // accept the handoff and then throw the body away.
+        assert_eq!(stdout, b"{}\n");
+        while let Some(request) = first_request(&mut requests).await {
+            assert!(
+                !request.starts_with("GET /handoff"),
+                "grok user-prompt must not accept the handoff: {request}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn grok_user_prompt_submit_stem_does_not_fetch_the_handoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().join("data");
+        let cwd = tmp.path().join("repo");
+        std::fs::create_dir(&cwd).unwrap();
+        write_briefing_marker(&cwd);
+        let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
+        let mut stdout = Vec::new();
+        run_with_payload(
+            Some(data_dir),
+            grok_hook_args("user-prompt-submit", &base),
+            serde_json::json!({
+                "session_id": "grok-session",
+                "cwd": cwd,
+                "prompt": "hi"
+            })
+            .to_string(),
+            &mut stdout,
+            |_, _| Ok(()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stdout, b"{}\n");
+        while let Some(request) = first_request(&mut requests).await {
+            assert!(
+                !request.starts_with("GET /handoff"),
+                "briefing opt-in must not make grok fetch /handoff: {request}"
+            );
+        }
     }
 
     #[test]

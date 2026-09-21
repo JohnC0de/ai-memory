@@ -414,6 +414,13 @@ impl AgentKind {
     /// `session/hooks/user-prompt.ts`, verified in the v0.28.1 source).
     /// Empty stdout injects nothing, so the hook prints the raw handoff body
     /// or nothing at all — never a JSON envelope.
+    ///
+    /// Grok Build also ignores `SessionStart` stdout, but it is not in this
+    /// set. Its hook guide discards stdout of an allowing `UserPromptSubmit`
+    /// and that event has no `additionalContext`. `GET /handoff` marks the
+    /// handoff accepted, so fetching there would burn the baton and
+    /// `memory_handoff_accept` could not recover it. Leave Grok out until a
+    /// hook event Grok actually injects exists.
     #[must_use]
     pub fn user_prompt_injects_handoff(self) -> bool {
         matches!(self, Self::KimiCode)
@@ -457,9 +464,10 @@ mod tests {
         );
         // Unknown tags still degrade to Other.
         assert_eq!(AgentKind::from_wire("grok-2"), AgentKind::Other);
-        // Grok cannot inject the session-start handoff (ignores hook stdout);
-        // every other agent can.
+        // Grok cannot inject the session-start handoff (ignores hook stdout),
+        // and must not fetch on UserPromptSubmit either (that stdout is discarded).
         assert!(!AgentKind::Grok.session_start_injects_handoff());
+        assert!(!AgentKind::Grok.user_prompt_injects_handoff());
         assert!(!AgentKind::Zero.session_start_injects_handoff());
         assert!(AgentKind::ClaudeCode.session_start_injects_handoff());
         assert!(AgentKind::Codex.session_start_injects_handoff());
