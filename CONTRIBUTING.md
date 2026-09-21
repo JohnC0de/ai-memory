@@ -77,9 +77,13 @@ Skipped tests still count as "skipped" in the summary, never hidden, and two
 independent things run them anyway: the pre-push hook and CI.
 
 Install the hook once per clone with `scripts/install-git-hooks.sh` (from Git
-Bash on Windows). It appends or updates only ai-memory's managed block in
-`.git/hooks/pre-push`, preserving any existing hook body. Bypass it on a
-work-in-progress branch with `git push --no-verify`.
+Bash on Windows). It can run from the main checkout or a linked worktree;
+both use the shared repository hook directory. Reinstallation replaces
+ai-memory's managed block in place, preserving surrounding user commands and
+their order. If `core.hooksPath` is set, the installer stops before writing;
+integrate the block through your existing hook manager instead. Incomplete or
+duplicate managed markers also stop installation and leave the hook unchanged.
+Bypass it on a work-in-progress branch with `git push --no-verify`.
 
 The managed test block clears Git's repository environment and disables global
 and system Git configuration for Cargo and its children. Fixture commands can

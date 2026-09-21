@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs this repo's pre-push hook into .git/hooks without discarding an
-# existing user hook. Run once per clone (from Git Bash on Windows):
+# Installs this repo's pre-push hook without moving existing user commands.
+# Run once per clone (from Git Bash on Windows):
 #
 #   scripts/install-git-hooks.sh
 #
@@ -12,28 +12,21 @@
 set -euo pipefail
 
 repo_root=$(git rev-parse --show-toplevel)
-hook="$repo_root/.git/hooks/pre-push"
+cd "$repo_root"
+if git config --get core.hooksPath >/dev/null; then
+    echo 'core.hooksPath is set; this installer only manages the shared repository hook directory' >&2
+    exit 1
+else
+    config_status=$?
+    if [[ "$config_status" -ne 1 ]]; then
+        exit "$config_status"
+    fi
+fi
+hook=$(git rev-parse --git-path hooks/pre-push)
 begin="# >>> ai-memory pre-push >>>"
 end="# <<< ai-memory pre-push <<<"
-tmp=$(mktemp "${hook}.XXXXXX")
-trap 'rm -f "$tmp"' EXIT
 
-if [[ -f "$hook" ]]; then
-    awk -v begin="$begin" -v end="$end" '
-        $0 == begin { skip = 1; next }
-        $0 == end { skip = 0; next }
-        !skip { print }
-    ' "$hook" > "$tmp"
-    if grep -q '[^[:space:]]' "$tmp"; then
-        printf '\n' >> "$tmp"
-    else
-        printf '%s\n\n' '#!/usr/bin/env bash' '# Installed by scripts/install-git-hooks.sh.' > "$tmp"
-    fi
-else
-    printf '%s\n\n' '#!/usr/bin/env bash' '# Installed by scripts/install-git-hooks.sh.' > "$tmp"
-fi
-
-cat >> "$tmp" <<'HOOK'
+managed_block=$(cat <<'HOOK'
 # >>> ai-memory pre-push >>>
 # Runs the full test tier before a push. See scripts/install-git-hooks.sh.
 set -euo pipefail
@@ -69,8 +62,57 @@ fi
 )
 # <<< ai-memory pre-push <<<
 HOOK
+)
+
+has_content=0
+if [[ -f "$hook" ]]; then
+    if grep -q '[^[:space:]]' "$hook"; then
+        has_content=1
+    else
+        read_status=$?
+        if [[ "$read_status" -ne 1 ]]; then
+            exit "$read_status"
+        fi
+    fi
+fi
+
+mkdir -p "${hook%/*}"
+tmp=$(mktemp "${hook}.XXXXXX")
+if [[ "$has_content" -eq 1 ]]; then
+    # ENVIRON preserves the block's backslashes; awk -v would interpret them.
+    if ! AI_MEMORY_PRE_PUSH_BLOCK="$managed_block" awk -v begin="$begin" -v end="$end" '
+        {
+            marker = $0
+            sub(/\r$/, "", marker)
+            if (marker == begin) {
+                if (inside || seen) { invalid = 1; exit 1 }
+                inside = seen = 1
+                print ENVIRON["AI_MEMORY_PRE_PUSH_BLOCK"]
+                next
+            }
+            if (marker == end) {
+                if (!inside) { invalid = 1; exit 1 }
+                inside = 0
+                next
+            }
+            if (!inside) print
+        }
+        END {
+            if (invalid || inside) exit 1
+            if (!seen) {
+                print ""
+                print ENVIRON["AI_MEMORY_PRE_PUSH_BLOCK"]
+            }
+        }
+    ' "$hook" > "$tmp"; then
+        printf 'invalid managed markers in %s; original unchanged, temporary file retained at %s\n' "$hook" "$tmp" >&2
+        exit 1
+    fi
+else
+    printf '%s\n\n' '#!/usr/bin/env bash' '# Installed by scripts/install-git-hooks.sh.' > "$tmp"
+    printf '%s\n' "$managed_block" >> "$tmp"
+fi
 
 mv "$tmp" "$hook"
-trap - EXIT
 chmod +x "$hook"
 echo "installed $hook"

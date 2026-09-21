@@ -1164,11 +1164,10 @@ fn macos_docs_use_valid_install_commands_and_release_body_points_to_them() {
 
 /// Every external command the installer, the generated hook, and the probes
 /// below actually run. Shell builtins (`printf`, `echo`, `command`) are not
-/// here; neither is `cargo`, which is an exported function, nor `rm`, which
-/// only the installer's failure trap needs and these tests never reach.
+/// here; neither is `cargo`, which is an exported function.
 #[cfg(any(unix, windows))]
 const FIXTURE_TOOLS: &[&str] = &[
-    "awk", "bash", "cat", "chmod", "env", "git", "grep", "mktemp", "mv", "sort", "uname",
+    "awk", "bash", "cat", "chmod", "env", "git", "grep", "mkdir", "mktemp", "mv", "sort", "uname",
 ];
 
 /// Give up on the pre-push tests, or refuse to.
@@ -1588,10 +1587,14 @@ impl PrePushFixture {
     }
 
     fn install_hook(&self) {
+        self.install_hook_from(&self.hook_repo);
+    }
+
+    fn install_hook_from(&self, cwd: &Path) {
         let mut command = Command::new(&self.bash);
         command.arg(self.shell_arg(&repo_root().join("scripts/install-git-hooks.sh")));
         self.isolate(&mut command);
-        let output = command.current_dir(&self.hook_repo).output().unwrap();
+        let output = command.current_dir(cwd).output().unwrap();
         assert!(
             output.status.success(),
             "installer failed: stdout={} stderr={}",
@@ -1760,13 +1763,6 @@ fn pre_push_hook_leaves_the_user_hook_environment_intact_around_the_block() {
     }
 }
 
-/// Reinstalling must keep the user's own content and leave exactly one managed
-/// block.
-///
-/// It asserts nothing about where that content ends up relative to the block:
-/// the installer strips the old block and appends the new one at the end, so a
-/// body that used to follow the block now precedes it. That reordering predates
-/// this change and is deliberately left alone here.
 #[test]
 #[cfg(any(unix, windows))]
 fn pre_push_hook_reinstall_keeps_user_content_and_one_managed_block() {
@@ -1774,12 +1770,19 @@ fn pre_push_hook_reinstall_keeps_user_content_and_one_managed_block() {
         return;
     };
     fixture.write_runner(0, false);
-    fixture.write_user_hook("");
+    fixture.write_user_hook("printf 'order-before\\n'\n");
     fixture.install_hook();
     fixture.append_after_managed_block();
+    let original = std::fs::read_to_string(&fixture.hook).unwrap();
+    let original = format!("{original}printf 'order-after\\n'\n");
+    std::fs::write(&fixture.hook, &original).unwrap();
     fixture.install_hook();
 
     let installed = std::fs::read_to_string(&fixture.hook).unwrap();
+    assert_eq!(
+        installed, original,
+        "reinstalling changed the hook's layout"
+    );
     assert_eq!(
         installed.matches("# >>> ai-memory pre-push >>>").count(),
         1,
@@ -1809,6 +1812,193 @@ fn pre_push_hook_reinstall_keeps_user_content_and_one_managed_block() {
         &fixture.fixture_toplevel,
         "the scrub did not survive a reinstall",
     );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.find("order-before").unwrap() < stdout.find("pre-push: cargo").unwrap());
+    assert!(stdout.find("pre-push: cargo").unwrap() < stdout.find("order-after").unwrap());
+    fixture.write_runner(29, false);
+    let failed = fixture.run_hook();
+    assert_eq!(failed.status.code(), Some(29));
+    assert!(!String::from_utf8_lossy(&failed.stdout).contains("order-after"));
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn pre_push_hook_installs_from_a_linked_worktree_subdirectory() {
+    let Some(fixture) = PrePushFixture::new() else {
+        return;
+    };
+    fixture.git(
+        &fixture.hook_repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "-qm",
+            "fixture",
+        ],
+    );
+    let linked = fixture.hook_repo.parent().unwrap().join("linked checkout");
+    fixture.git(
+        &fixture.hook_repo,
+        &["worktree", "add", "--detach", &fixture.git_arg(&linked)],
+    );
+    let nested = linked.join("nested");
+    std::fs::create_dir(&nested).unwrap();
+    assert!(linked.join(".git").is_file());
+    fixture.install_hook_from(&nested);
+    assert!(
+        fixture.hook.is_file(),
+        "linked worktrees must use the shared hook"
+    );
+    fixture.install_hook_from(&fixture.hook_repo);
+
+    fixture.write_runner(0, false);
+    let runner = std::fs::read_to_string(&fixture.runner).unwrap();
+    std::fs::write(
+        &fixture.runner,
+        runner.replace(
+            "exec bash \"$AI_MEMORY_FIXTURE_HOOK\"",
+            "exec git hook run pre-push",
+        ),
+    )
+    .unwrap();
+    let mut command = Command::new(&fixture.bash);
+    command.arg(fixture.shell_arg(&fixture.runner));
+    fixture.isolate(&mut command);
+    fixture.shell_env(&mut command);
+    let output = command.current_dir(&nested).output().unwrap();
+    assert!(
+        output.status.success(),
+        "Git failed to run the shared hook: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        log_field(&fixture.cargo_log(), "cargo-argv"),
+        "test --workspace --all-targets"
+    );
+    assert_same_directory(
+        log_field(&fixture.cargo_log(), "cargo-toplevel"),
+        &fixture.fixture_toplevel,
+        "the shared hook must isolate Cargo's Git environment",
+    );
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn pre_push_hook_refuses_configured_hooks_paths_without_writing() {
+    for (scope, value) in [
+        ("--local", ""),
+        ("--local", ".git/hooks"),
+        ("--local", "/dev/null"),
+        ("--local", "custom hooks"),
+        ("--global", "absolute"),
+    ] {
+        let Some(fixture) = PrePushFixture::new() else {
+            return;
+        };
+        let shared = fixture.home.join("shared hooks");
+        std::fs::create_dir(&shared).unwrap();
+        let shared_hook = shared.join("pre-push");
+        std::fs::write(&shared_hook, "#!/bin/sh\necho user-owned\n").unwrap();
+        let path = if value == "absolute" {
+            fixture.git_arg(&shared)
+        } else {
+            value.to_owned()
+        };
+        fixture.git(
+            &fixture.hook_repo,
+            &["config", scope, "core.hooksPath", &path],
+        );
+        let mut command = Command::new(&fixture.bash);
+        command.arg(fixture.shell_arg(&repo_root().join("scripts/install-git-hooks.sh")));
+        fixture.isolate(&mut command);
+        let output = command.current_dir(&fixture.hook_repo).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("core.hooksPath is set"));
+        assert!(!fixture.hook.exists());
+        assert!(!fixture.hook_repo.join("custom hooks").exists());
+        assert_eq!(
+            std::fs::read_to_string(shared_hook).unwrap(),
+            "#!/bin/sh\necho user-owned\n"
+        );
+        assert_eq!(
+            fixture.git(&fixture.hook_repo, &["config", "--get", "core.hooksPath"]),
+            path
+        );
+    }
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn pre_push_hook_refuses_ambiguous_markers_without_replacing_the_user_hook() {
+    let begin = "# >>> ai-memory pre-push >>>";
+    let end = "# <<< ai-memory pre-push <<<";
+    for body in [
+        format!("{begin}\necho user-owned\n"),
+        format!("echo user-owned\n{end}\n"),
+        format!("{begin}\n{end}\n{begin}\n{end}\n"),
+    ] {
+        let Some(fixture) = PrePushFixture::new() else {
+            return;
+        };
+        std::fs::write(&fixture.hook, &body).unwrap();
+        let mut command = Command::new(&fixture.bash);
+        command.arg(fixture.shell_arg(&repo_root().join("scripts/install-git-hooks.sh")));
+        fixture.isolate(&mut command);
+        let output = command.current_dir(&fixture.hook_repo).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("invalid managed markers"));
+        assert_eq!(std::fs::read_to_string(&fixture.hook).unwrap(), body);
+    }
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn pre_push_hook_replaces_crlf_markers_and_stale_block_in_place() {
+    let Some(fixture) = PrePushFixture::new() else {
+        return;
+    };
+    let before = "#!/usr/bin/env bash\r\nprintf 'before\\n'\r\n";
+    let after = "printf 'after\\n'\r\n";
+    std::fs::write(&fixture.hook, format!("{before}# >>> ai-memory pre-push >>>\r\necho stale-block\r\n# <<< ai-memory pre-push <<<\r\n{after}")).unwrap();
+    fixture.install_hook();
+    let installed = std::fs::read_to_string(&fixture.hook).unwrap();
+    assert!(installed.starts_with(before));
+    assert!(installed.ends_with(after));
+    assert!(!installed.contains("stale-block"));
+    assert!(installed.contains("git rev-parse --local-env-vars"));
+    fixture.install_hook();
+    assert_eq!(std::fs::read_to_string(&fixture.hook).unwrap(), installed);
+}
+
+#[test]
+#[cfg(unix)]
+fn pre_push_hook_preserves_an_unreadable_existing_hook() {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(fixture) = PrePushFixture::new() else {
+        return;
+    };
+    let original = "#!/usr/bin/env bash\necho user-owned\n";
+    std::fs::write(&fixture.hook, original).unwrap();
+    std::fs::set_permissions(&fixture.hook, std::fs::Permissions::from_mode(0o200)).unwrap();
+    if std::fs::File::open(&fixture.hook).is_ok() {
+        skip_pre_push_tests::<()>("the process can read a write-only file");
+        return;
+    }
+    let mut command = Command::new(&fixture.bash);
+    command.arg(fixture.shell_arg(&repo_root().join("scripts/install-git-hooks.sh")));
+    fixture.isolate(&mut command);
+    let output = command.current_dir(&fixture.hook_repo).output().unwrap();
+    std::fs::set_permissions(&fixture.hook, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(
+        !output.status.success(),
+        "a read error must abort installation"
+    );
+    assert_eq!(std::fs::read_to_string(&fixture.hook).unwrap(), original);
 }
 
 /// A user hook that narrowed `IFS` before the managed block used to break the
