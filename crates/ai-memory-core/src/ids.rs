@@ -362,8 +362,10 @@ impl AgentKind {
     /// into the resuming session as context. Agents that consume it return
     /// `true` (Claude Code reads `hookSpecificOutput.additionalContext`).
     ///
-    /// Grok ignores hook stdout on `SessionStart` (per Grok's hooks docs:
-    /// "For events like SessionStart or PostToolUse, stdout is ignored"), and
+    /// Grok ignores hook stdout on `SessionStart` (per Grok's hooks guide:
+    /// stdout for that event is ignored). `PostToolUse` stdout is read and
+    /// `additionalContext` is shown to the model after the tool result. See
+    /// [`Self::post_tool_injects_handoff`].
     /// Zero's agent loop discards the sessionStart dispatch result entirely
     /// (`internal/agent/loop.go` ignores `Dispatch`'s return there), so
     /// the native hook must NOT fetch the handoff for it: the fetch is
@@ -415,15 +417,29 @@ impl AgentKind {
     /// Empty stdout injects nothing, so the hook prints the raw handoff body
     /// or nothing at all — never a JSON envelope.
     ///
-    /// Grok Build also ignores `SessionStart` stdout, but it is not in this
-    /// set. Its hook guide discards stdout of an allowing `UserPromptSubmit`
-    /// and that event has no `additionalContext`. `GET /handoff` marks the
-    /// handoff accepted, so fetching there would burn the baton and
-    /// `memory_handoff_accept` could not recover it. Leave Grok out until a
-    /// hook event Grok actually injects exists.
+    /// Grok Build also ignores `SessionStart` stdout, and it is not in this
+    /// set. An allowing `UserPromptSubmit` discards stdout and has no
+    /// `additionalContext`. `GET /handoff` marks the handoff accepted, so
+    /// fetching on that event would burn the baton. Grok shows
+    /// `PostToolUse` `additionalContext` to the model; that is
+    /// [`Self::post_tool_injects_handoff`].
     #[must_use]
     pub fn user_prompt_injects_handoff(self) -> bool {
         matches!(self, Self::KimiCode)
+    }
+
+    /// Whether `PostToolUse` stdout is model-visible context.
+    ///
+    /// Grok Build reads that stdout and delivers `hookSpecificOutput.additionalContext`
+    /// after the tool result (`10-hooks.md`, PostToolUse Output). The handoff
+    /// is accepted on the first such event of a session, not on `SessionStart`
+    /// or `UserPromptSubmit`, because those outputs never reach the model.
+    /// The model sees the handoff after the first tool, not before the first
+    /// prompt. A session that never calls a tool leaves the handoff open for
+    /// `memory_handoff_accept`.
+    #[must_use]
+    pub fn post_tool_injects_handoff(self) -> bool {
+        matches!(self, Self::Grok)
     }
 }
 
@@ -468,6 +484,9 @@ mod tests {
         // and must not fetch on UserPromptSubmit either (that stdout is discarded).
         assert!(!AgentKind::Grok.session_start_injects_handoff());
         assert!(!AgentKind::Grok.user_prompt_injects_handoff());
+        assert!(AgentKind::Grok.post_tool_injects_handoff());
+        assert!(!AgentKind::KimiCode.post_tool_injects_handoff());
+        assert!(!AgentKind::ClaudeCode.post_tool_injects_handoff());
         assert!(!AgentKind::Zero.session_start_injects_handoff());
         assert!(AgentKind::ClaudeCode.session_start_injects_handoff());
         assert!(AgentKind::Codex.session_start_injects_handoff());
