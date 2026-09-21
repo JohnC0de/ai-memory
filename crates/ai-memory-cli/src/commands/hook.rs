@@ -595,11 +595,10 @@ where
     let admits_capture = repository_admits_capture(capture_mode, marker_present);
     if args.check_capture {
         let protocol = decision.as_ref().map(|decision| decision.protocol());
-        let output = serde_json::json!({
+        let mut output = serde_json::json!({
             "capture_mode": capture_mode,
             "marker_present": marker_present,
             "admits_capture": admits_capture && !external_capture,
-            "external_capture": external_capture,
             "version": protocol.map_or(1, |protocol| protocol.version()),
             "policy_state": protocol.map_or(PolicyState::Inactive, |protocol| protocol.policy_state()),
             "tool_family": protocol.map_or(ai_memory_hooks::ToolFamily::Unknown, |protocol| protocol.tool_family()),
@@ -607,6 +606,9 @@ where
             "disposition": protocol.map_or(CaptureDisposition::Keep, |protocol| protocol.disposition()),
             "extraction_state": protocol.map_or(ai_memory_hooks::ExtractionState::NotApplicable, |protocol| protocol.extraction_state()),
         });
+        if external_capture {
+            output["external_capture"] = true.into();
+        }
         writeln!(stdout, "{output}")?;
         return Ok(());
     }
@@ -2328,7 +2330,6 @@ mod tests {
                 "admits_capture",
                 "capture_mode",
                 "disposition",
-                "external_capture",
                 "extraction_state",
                 "marker_present",
                 "path_count",
