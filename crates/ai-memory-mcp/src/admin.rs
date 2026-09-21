@@ -1980,6 +1980,13 @@ async fn handle_auto_improve(
         proposal_actor: req.proposal_actor.clone(),
         pending_path: req.pending_path.clone(),
         max_patchable_pages: req.max_patchable_pages,
+        // The admin surface does not expose this yet; the reviewer keeps the
+        // configured default rather than silently reading no page bodies (#834).
+        patchable_page_prefixes:
+            ai_memory_consolidate::DEFAULT_AUTO_IMPROVE_PATCHABLE_PAGE_PREFIXES
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect(),
         max_patchable_body_chars: req.max_patchable_body_chars,
         max_edits_per_proposal: req.max_edits_per_proposal,
         max_edit_content_chars: req.max_edit_content_chars,
