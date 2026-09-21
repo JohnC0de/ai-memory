@@ -618,7 +618,11 @@ The rendered hooks config looks like:
   the conversation. After the final turn, run
   `ai-memory finalize-session --agent antigravity-cli` to close the session and,
   when it contains substantive events, create the final summary and automatic
-  handoff and queue opt-in SessionEnd consolidation.
+  handoff and queue opt-in SessionEnd consolidation. If the conversation
+  continues after that first finalize, re-close it with
+  `ai-memory finalize-session --agent antigravity-cli --reopen --session-id <uuid>`
+  so the session-end path re-runs over the new observations (re-running with
+  nothing new is a harmless no-op).
 - `memory_handoff_begin` always creates an explicit manual handoff with no
   `from_session_id` and `from_agent = other`; it is project-wide for cwd
   matching but belongs to the creating operator by default. Pass `shared=true`

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ai-memory finalize-session --reopen --session-id <uuid>` re-finalizes a
+  session that already ended, for agents without a true session-end event
+  (Antigravity CLI, Kiro, ZCode, Pool) whose conversation continued after a
+  first manual finalize: the discovery step now accepts `include_ended=true`
+  on `GET /admin/open-sessions` for an exact session id (rejected without
+  one, so reopening stays exact-id-only and never a bulk operation), and the
+  server's normal session-end path re-runs over the new observations
+  (updated summary page via supersession, new handoff, opt-in
+  consolidation). Re-running with nothing new since the first end remains a
+  harmless no-op. The default finalize behavior is unchanged: ended sessions
+  stay invisible unless `--reopen` is passed.
+
 ### Security
 - Bumped `rmcp` to 2.x (2.2.0), resolving three MCP transport advisories:
   GHSA-9pj6-vhgr-3mwh (unauthenticated Streamable-HTTP session-table leak /
