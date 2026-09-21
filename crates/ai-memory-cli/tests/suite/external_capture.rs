@@ -410,17 +410,21 @@ mod slow {
     #[tokio::test]
     async fn documented_batch_example_is_idempotent() {
         let fixture = Fixture::start().await;
-        let doc = include_str!("../../../../docs/external-lifecycle.md");
-        let example = doc
-            .split("```json\n")
-            .nth(1)
-            .unwrap()
-            .split("```")
-            .next()
-            .unwrap();
-        let events: Vec<Value> = serde_json::from_str(example).unwrap();
-        fixture.batch(&events).await;
-        fixture.batch(&events).await;
+        let doc = include_str!("../../../../docs/external-lifecycle.md").replace("\r\n", "\n");
+        // Git may check out Markdown with CRLF on Windows. Exercise both
+        // forms here so the example remains executable on either platform.
+        for doc in [doc.clone(), doc.replace('\n', "\r\n")] {
+            let example = doc
+                .split("```json")
+                .nth(1)
+                .unwrap()
+                .split("```")
+                .next()
+                .unwrap();
+            let events: Vec<Value> = serde_json::from_str(example).unwrap();
+            fixture.batch(&events).await;
+            fixture.batch(&events).await;
+        }
         assert_eq!(
             fixture.reader.status_counts().await.unwrap().observations,
             1
