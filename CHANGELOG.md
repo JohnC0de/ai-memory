@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (updated summary page via supersession, new handoff, opt-in
   consolidation). Re-running with nothing new since the first end remains a
   harmless no-op. The default finalize behavior is unchanged: ended sessions
-  stay invisible unless `--reopen` is passed.
+  stay invisible unless `--reopen` is passed. (#836)
 
 ### Security
 - Bumped `rmcp` to 2.x (2.2.0), resolving three MCP transport advisories:
