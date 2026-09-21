@@ -470,6 +470,22 @@ fn grok_post_tool_handoff_envelope(handoff: &str) -> serde_json::Value {
     })
 }
 
+fn payload_is_subagent(raw: &serde_json::Value) -> bool {
+    [
+        "subagentType",
+        "subagent_type",
+        "agent_type",
+        "agent_id",
+        "parentSessionId",
+    ]
+    .iter()
+    .any(|key| {
+        raw.get(*key)
+            .and_then(|value| value.as_str())
+            .is_some_and(|text| !text.trim().is_empty())
+    })
+}
+
 fn clip_chars(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
@@ -887,7 +903,7 @@ where
             canonical_session_id.as_deref(),
             policy_cwd.as_deref(),
         );
-        if !shown.is_file() {
+        if !shown.is_file() && !payload_is_subagent(&json) {
             let client = build_client();
             let bearer = hook_spool::resolve_bearer(&client, &dd, effective_token).await;
             let native_session_qs = canonical_session_id
@@ -901,8 +917,11 @@ where
             );
             let handoff =
                 get_handoff(&client, &handoff_url, bearer.as_deref(), handoff_timeout()).await;
-            mark_briefed(&shown);
+            // Only a real body consumes this session's one chance. An empty
+            // or failed claim must retry on the next parent tool; a child
+            // session that errors must not burn the baton for the parent.
             if let Some(handoff) = handoff {
+                mark_briefed(&shown);
                 let envelope = grok_post_tool_handoff_envelope(&handoff);
                 writeln!(stdout, "{envelope}")?;
                 return Ok(());
@@ -3164,6 +3183,35 @@ mod tests {
             envelope["hookSpecificOutput"]["additionalContext"],
             "AMWS-HANDOFF-DELTA"
         );
+    }
+
+    #[tokio::test]
+    async fn grok_post_tool_skips_a_subagent_payload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (base, mut requests) = serve_requests("200 OK", "AMWS-HANDOFF-DELTA").await;
+        let mut stdout = Vec::new();
+        run_with_payload(
+            Some(tmp.path().join("data")),
+            grok_hook_args("post-tool-use", &base),
+            serde_json::json!({
+                "session_id": "child-session",
+                "cwd": tmp.path(),
+                "subagentType": "goal-plan-writer",
+                "tool_name": "read_file"
+            })
+            .to_string(),
+            &mut stdout,
+            |_, _| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stdout, b"{}\n");
+        while let Some(request) = first_request(&mut requests).await {
+            assert!(
+                !request.starts_with("GET /handoff"),
+                "a child session must not accept the parent handoff: {request}"
+            );
+        }
     }
 
     #[tokio::test]

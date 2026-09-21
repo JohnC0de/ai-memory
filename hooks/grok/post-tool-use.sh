@@ -29,10 +29,16 @@ if [ -f "$SHOWN" ]; then
     exit 0
 fi
 
+case "$PAYLOAD" in
+    *'"subagentType"'*|*'\"subagentType\"'*|*'"parentSessionId"'*)
+        printf '{}\n'
+        exit 0
+        ;;
+esac
 BRIEF_QS=$(ai_memory_briefing_qs "$CWD")
 HANDOFF=$(ai_memory_get_handoff "$SERVER/handoff?agent=grok${QS}${SESSION_QS}${BRIEF_QS}" 2>/dev/null || true)
-ai_memory_mark_briefed "$SHOWN"
 if [ -n "$HANDOFF" ]; then
+    ai_memory_mark_briefed "$SHOWN"
     CTX=$(printf '%s' "$HANDOFF" | ai_memory_json_string)
     printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":%s}}\n' "$CTX"
     exit 0
