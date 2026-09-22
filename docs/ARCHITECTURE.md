@@ -676,6 +676,7 @@ min_confidence = 0.75
 max_input_tokens = 24000
 max_proposals_per_run = 5
 max_patchable_pages = 8
+patchable_page_prefixes = ["_rules/", "procedures/"]
 max_patchable_body_chars = 8000
 max_edits_per_proposal = 5
 max_edit_content_chars = 4000

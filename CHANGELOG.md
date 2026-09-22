@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `auto_improve.patchable_page_prefixes` makes the folders whose page bodies the
+  reviewer reads configurable, defaulting to the historical `_rules/` and
+  `procedures/`. Only those two folders' contents were ever sent; every other
+  page reached the model as a single title line, so a project keeping its
+  durable knowledge in `decisions/` or `gotchas/` — with no `_rules/` pages at
+  all — sent no page bodies, and the reviewer re-proposed invariants that were
+  already written down, at high confidence, indefinitely. Existing configs are
+  unchanged. (#834)
+
 ### Fixed
 - `ai-memory serve` no longer leaked file descriptors from half-open HTTP
   connections until `EMFILE`, breaking the healthcheck (an unauthenticated
