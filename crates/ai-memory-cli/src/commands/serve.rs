@@ -4179,18 +4179,17 @@ mod tests {
             .html_auth
             .expect("builtin wiki mount must return html_auth");
         let router = apply_host_layer(
-            web.public
-                .merge(
-                    web.protected
-                        .layer(axum::middleware::from_fn_with_state(
-                            auth,
-                            require_dual_auth,
-                        ))
-                        .layer(axum::middleware::from_fn_with_state(
-                            html_auth,
-                            html_auth_redirect_mw,
-                        )),
-                ),
+            web.public.merge(
+                web.protected
+                    .layer(axum::middleware::from_fn_with_state(
+                        auth,
+                        require_dual_auth,
+                    ))
+                    .layer(axum::middleware::from_fn_with_state(
+                        html_auth,
+                        html_auth_redirect_mw,
+                    )),
+            ),
             vec!["localhost".to_string()],
         );
 
@@ -4252,7 +4251,10 @@ mod tests {
             .unwrap();
         let html = std::str::from_utf8(&body).unwrap();
         assert!(html.contains("Sign in"), "login page body: {html}");
-        assert!(html.contains("ai-memory-base-path"), "inject base-path meta");
+        assert!(
+            html.contains("ai-memory-base-path"),
+            "inject base-path meta"
+        );
 
         // Change-password HTML is public (must_change_password flow).
         let change = router

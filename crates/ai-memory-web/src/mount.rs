@@ -360,14 +360,7 @@ pub fn split_web_routers(
             spec.base_path,
             mount,
         ),
-        protected: mount_builtin_browser(
-            protected_api,
-            reader,
-            wiki,
-            &slug,
-            mount,
-            browser_inject,
-        ),
+        protected: mount_builtin_browser(protected_api, reader, wiki, &slug, mount, browser_inject),
         html_auth: Some(auth_cfg),
     })
 }

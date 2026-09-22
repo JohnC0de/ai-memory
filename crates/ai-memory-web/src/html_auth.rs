@@ -75,17 +75,13 @@ pub fn sanitize_next(raw: Option<&str>, web_root: &str) -> String {
     let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
         return default;
     };
-    if raw.contains("://") || raw.starts_with("//") || raw.contains('\\') || raw.contains('\0')
-    {
+    if raw.contains("://") || raw.starts_with("//") || raw.contains('\\') || raw.contains('\0') {
         return default;
     }
     if !raw.starts_with('/') {
         return default;
     }
-    let path = raw
-        .split_once(['?', '#'])
-        .map(|(p, _)| p)
-        .unwrap_or(raw);
+    let path = raw.split_once(['?', '#']).map(|(p, _)| p).unwrap_or(raw);
     if web_root.is_empty() {
         // Wiki mounted at host/base root — still reject escaping to
         // sibling host routes by requiring a single-path absolute form
@@ -141,10 +137,8 @@ pub async fn html_auth_redirect_mw(
     }
     match resp.status() {
         StatusCode::UNAUTHORIZED => {
-            let next_q = urlencoding_encode(&sanitize_next(
-                Some(&full_path_and_query),
-                &cfg.web_root,
-            ));
+            let next_q =
+                urlencoding_encode(&sanitize_next(Some(&full_path_and_query), &cfg.web_root));
             Redirect::to(&format!("{}?next={next_q}", cfg.login_path)).into_response()
         }
         StatusCode::FORBIDDEN => Redirect::to(&cfg.change_password_path).into_response(),
@@ -220,10 +214,7 @@ mod tests {
 
     #[test]
     fn sanitize_next_under_base_path() {
-        assert_eq!(
-            sanitize_next(Some("/wiki/web"), "/wiki/web"),
-            "/wiki/web"
-        );
+        assert_eq!(sanitize_next(Some("/wiki/web"), "/wiki/web"), "/wiki/web");
         assert_eq!(
             sanitize_next(Some("/wiki/web/w/a"), "/wiki/web"),
             "/wiki/web/w/a"
@@ -249,15 +240,15 @@ mod tests {
     fn redirect_probe(status: StatusCode) -> Router {
         let cfg = Arc::new(HtmlAuthRedirectConfig::from_mount("", "/web"));
         Router::new()
-            .route(
-                "/wiki",
-                get(move || async move { status.into_response() }),
-            )
+            .route("/wiki", get(move || async move { status.into_response() }))
             .route(
                 "/api/v1/projects",
                 get(move || async move { StatusCode::UNAUTHORIZED.into_response() }),
             )
-            .layer(axum::middleware::from_fn_with_state(cfg, html_auth_redirect_mw))
+            .layer(axum::middleware::from_fn_with_state(
+                cfg,
+                html_auth_redirect_mw,
+            ))
     }
 
     #[tokio::test]
