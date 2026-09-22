@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Auto-improve review no longer stages a proposal whose LLM-produced page
+  path contains a Windows-illegal character (e.g. a `:` copied from a
+  conventional-commit subject). That path passed the deliberately tolerant
+  `PagePath::new` and only failed later at `ensure_portable` when the
+  proposal was approved, so the learning loop queued work that could not
+  be applied. Paths are now sanitized the same way bootstrap (#847) and
+  per-session consolidation (#848) already sanitize theirs, before
+  validation; a path that is still unportable after sanitizing is rejected
+  instead of staged.
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
   active developer directory is Command Line Tools only: SwiftUI `@State`
   needs the `SwiftUIMacros` plugin shipped with full Xcode, so the script
