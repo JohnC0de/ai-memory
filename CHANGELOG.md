@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be applied. Paths are now sanitized the same way bootstrap (#847) and
   per-session consolidation (#848) already sanitize theirs, before
   validation; a path that is still unportable after sanitizing is rejected
-  instead of staged.
+  instead of staged. (#850)
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
   active developer directory is Command Line Tools only: SwiftUI `@State`
   needs the `SwiftUIMacros` plugin shipped with full Xcode, so the script
