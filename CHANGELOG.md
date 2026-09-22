@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- The `codex`, `openai-oauth` and `copilot` providers no longer send
+  `temperature` to `gpt-6-*` models. Codex answered these requests with
+  `400 Unsupported parameter: temperature`, so any provider or fallback
+  configured with `gpt-6-luna`, `gpt-6-sol` or `gpt-6-astra` failed on every
+  call. GPT-6 models now get the same treatment as `gpt-5*` and `o*`. (#851)
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
   active developer directory is Command Line Tools only: SwiftUI `@State`
   needs the `SwiftUIMacros` plugin shipped with full Xcode, so the script

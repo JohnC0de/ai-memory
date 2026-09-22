@@ -430,7 +430,7 @@ pub(crate) fn parse_sse_response(body: &str) -> LlmResult<CodexResponsesResponse
 
 fn model_uses_default_temperature(model: &str) -> bool {
     let m = model.to_ascii_lowercase();
-    m.starts_with("gpt-5") || m.starts_with('o')
+    m.starts_with("gpt-5") || m.starts_with("gpt-6") || m.starts_with('o')
 }
 
 #[derive(Debug, Serialize)]
@@ -704,6 +704,19 @@ mod tests {
             extract_account_id_from_jwt(&jwt(json!({ "organizations": [{ "id": "org" }] }))),
             Some("org".into())
         );
+    }
+
+    #[test]
+    fn codex_request_omits_gpt6_temperature() {
+        let request = ChatRequest {
+            system: None,
+            messages: vec![crate::types::ChatMessage::user("hello")],
+            temperature: Some(0.2),
+            max_tokens: 123,
+        };
+        let value =
+            serde_json::to_value(build_request("gpt-6-luna", &request, None, None)).unwrap();
+        assert!(value.get("temperature").is_none());
     }
 
     #[test]
