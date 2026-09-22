@@ -2945,11 +2945,6 @@ pub(crate) fn accept_handoff_in_transaction(
                 "handoff receiver session does not match the accepting scope and agent".into(),
             ));
         }
-        if !open {
-            return Err(StoreError::InvalidState(
-                "an ended session cannot accept a handoff".into(),
-            ));
-        }
         let already_claimed: bool = tx.query_row(
             "SELECT EXISTS( \
                  SELECT 1 FROM handoffs \
@@ -2963,6 +2958,15 @@ pub(crate) fn accept_handoff_in_transaction(
             // second baton, or an empty end could return only one and strand
             // the first accepted row.
             return Ok(false);
+        }
+        if !open {
+            // Grok reuses the session id after SessionEnd when the same
+            // conversation restarts. The row is the receiver, not a corpse,
+            // as long as it has not already taken a baton.
+            tx.execute(
+                "UPDATE sessions SET ended_at = NULL WHERE id = ?1",
+                params![accepting_session.as_bytes()],
+            )?;
         }
     }
     let metadata = tx

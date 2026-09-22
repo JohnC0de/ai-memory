@@ -33,6 +33,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Documented producer provenance and stable retries through the existing hook
   ingestion API, without changing its schema or standalone defaults. (#821)
 
+### Changed
+- Grok Build CLI shows a pending handoff, and an opted-in `[briefing]`, as
+  `PostToolUse` `additionalContext` on the first tool of a session.
+  `SessionStart` and `UserPromptSubmit` still do not accept the handoff (Grok
+  discards that stdout); a session that never calls a tool leaves the handoff
+  open for `memory_handoff_accept`. The note is clipped to 10,000 characters
+  (Grok's own cap). Because Grok reuses one session id across a
+  SessionEnd→restart, `memory_handoff_accept` now reopens an already-ended
+  receiver session (clears `ended_at`) instead of rejecting it — but only after
+  the exactly-once claim guard, so a session that already took a baton still
+  cannot take another (the multi-session claim-once invariant is preserved).
+  Delivery of this PostToolUse handoff is exempt from `AI_MEMORY_CAPTURE_OWNER`
+  capture suppression, like the other context-delivery events. (#840)
+
 ### Fixed
 - `ai-memory serve` no longer leaked file descriptors from half-open HTTP
   connections until `EMFILE`, breaking the healthcheck (an unauthenticated
