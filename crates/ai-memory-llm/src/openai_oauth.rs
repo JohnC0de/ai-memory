@@ -428,7 +428,10 @@ pub(crate) fn parse_sse_response(body: &str) -> LlmResult<CodexResponsesResponse
     Ok(response)
 }
 
-fn model_uses_default_temperature(model: &str) -> bool {
+/// Models on the ChatGPT/Codex and Copilot backends that reject a
+/// caller-supplied `temperature`. Shared by the `openai-oauth`, `codex`
+/// and `copilot` providers.
+pub(crate) fn model_uses_default_temperature(model: &str) -> bool {
     let m = model.to_ascii_lowercase();
     m.starts_with("gpt-5") || m.starts_with("gpt-6") || m.starts_with('o')
 }
