@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suppress capture while preserving supported handoff delivery and MCP recall.
   Documented producer provenance and stable retries through the existing hook
   ingestion API, without changing its schema or standalone defaults. (#821)
+- Builtin `/web` login and change-password pages for human password sessions:
+  unauthenticated browser GETs to the wiki redirect to `{web_slug}/login`
+  (not bare JSON 401), forms call existing `POST /auth/login` /
+  `/auth/password` / `/auth/logout`, and `--web-ui-dir` custom SPAs stay
+  unchanged. (#811)
 
 ### Changed
 - Grok Build CLI shows a pending handoff, and an opted-in `[briefing]`, as
