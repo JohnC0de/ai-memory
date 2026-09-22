@@ -441,6 +441,21 @@ impl AgentKind {
     pub fn post_tool_injects_handoff(self) -> bool {
         matches!(self, Self::Grok)
     }
+
+    /// Whether this agent reuses one session id across a `SessionEnd` and a
+    /// later restart of the same conversation.
+    ///
+    /// Grok does: the same session id comes back after an end, so an already-
+    /// ended receiver row is a live restart, not a corpse, and
+    /// `accept_handoff` reopens it. For every other agent an ended session is
+    /// final — a late/out-of-order startup fetch must not rebind it to a new
+    /// handoff, so accepting into an ended session stays an error (this is what
+    /// keeps a lifecycle-only receiver from reclaiming after it released and
+    /// ended).
+    #[must_use]
+    pub fn reuses_session_id_after_end(self) -> bool {
+        matches!(self, Self::Grok)
+    }
 }
 
 #[cfg(test)]

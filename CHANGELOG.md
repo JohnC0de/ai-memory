@@ -46,9 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open for `memory_handoff_accept`. The note is clipped to 10,000 characters
   (Grok's own cap). Because Grok reuses one session id across a
   SessionEnd→restart, `memory_handoff_accept` now reopens an already-ended
-  receiver session (clears `ended_at`) instead of rejecting it — but only after
-  the exactly-once claim guard, so a session that already took a baton still
-  cannot take another (the multi-session claim-once invariant is preserved).
+  receiver session (clears `ended_at`) instead of rejecting it — but only for
+  agents that reuse their session id across a restart (Grok); for every other
+  agent an ended session stays final, so a lifecycle-only receiver still cannot
+  reclaim after it released and ended. The reopen also only happens after the
+  exactly-once claim guard, so a session that already took a baton still cannot
+  take another (the multi-session claim-once invariant is preserved).
   Delivery of this PostToolUse handoff is exempt from `AI_MEMORY_CAPTURE_OWNER`
   capture suppression, like the other context-delivery events. (#840)
 
