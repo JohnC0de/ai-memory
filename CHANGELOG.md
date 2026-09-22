@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all — sent no page bodies, and the reviewer re-proposed invariants that were
   already written down, at high confidence, indefinitely. Existing configs are
   unchanged. (#834)
+- `ai-memory finalize-session --reopen --session-id <uuid>` re-finalizes a
+  session that already ended, for agents without a true session-end event
+  (Antigravity CLI, Kiro, ZCode, Pool) whose conversation continued after a
+  first manual finalize: the discovery step now accepts `include_ended=true`
+  on `GET /admin/open-sessions` for an exact session id (rejected without
+  one, so reopening stays exact-id-only and never a bulk operation), and the
+  server's normal session-end path re-runs over the new observations
+  (updated summary page via supersession, new handoff, opt-in
+  consolidation). Re-running with nothing new since the first end remains a
+  harmless no-op. The default finalize behavior is unchanged: ended sessions
+  stay invisible unless `--reopen` is passed. (#836)
 
 ### Fixed
 - `ai-memory serve` no longer leaked file descriptors from half-open HTTP

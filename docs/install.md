@@ -847,6 +847,9 @@ explicitly:
 ai-memory finalize-session --agent antigravity-cli
 # add --all only to close every matching open Antigravity session in this scope
 # or add --session-id <uuid> to close one exact concurrent session
+# if the conversation continued after a first finalize, re-close it to cover
+# the new observations (a re-run with nothing new is a harmless no-op)
+ai-memory finalize-session --agent antigravity-cli --reopen --session-id <uuid>
 ```
 
 ### Devin CLI
