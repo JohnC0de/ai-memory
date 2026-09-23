@@ -491,6 +491,25 @@ pub struct Config {
     pub decay: DecaySettings,
     /// Server-side scheduled maintenance. Jobs run outside hook latency.
     pub maintenance: MaintenanceSettings,
+    /// Lower edge (inclusive) of `memory_lint`'s A5 zero-LLM
+    /// contradiction-detection cosine-similarity band. Two cold pages whose
+    /// embeddings sit in `[contradiction_band_min, contradiction_band_max)`
+    /// are "same topic, not a duplicate" — flagged as a likely conflict.
+    ///
+    /// The band is a fixed absolute cosine value, but the background
+    /// similarity of unrelated pages is corpus-dependent: on a
+    /// single-language or single-domain store (or one written in a
+    /// non-English language), unrelated pages already sit well above the
+    /// general-purpose default floor, so the band ends up measuring domain
+    /// proximity rather than conflict and produces noisy findings. Raise
+    /// this floor for such a store. Default `0.4` preserves the historical
+    /// fixed band exactly. Settable via `AI_MEMORY_CONTRADICTION_BAND_MIN`.
+    pub contradiction_band_min: f32,
+    /// Upper edge (exclusive) of the band — see `contradiction_band_min`. At
+    /// or above this, two pages are treated as a near-duplicate (A3
+    /// cold-cluster dedup's territory) rather than a contradiction. Default
+    /// `0.75`. Settable via `AI_MEMORY_CONTRADICTION_BAND_MAX`.
+    pub contradiction_band_max: f32,
     /// Opt-in LLM "dream" pass (B2/B3/B4): rewrite/merge cold clusters with the
     /// configured provider, scheduled on idle and cancelled the moment the
     /// operator returns. OFF by default and gated on an R2 number before it may
@@ -921,6 +940,8 @@ impl Default for Config {
             embedding_document_prefix: None,
             decay: DecaySettings::default(),
             maintenance: MaintenanceSettings::default(),
+            contradiction_band_min: ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW,
+            contradiction_band_max: ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH,
             dream: DreamSettings::default(),
             retrieval: RetrievalSettings::default(),
             slots: SlotSettings::default(),
@@ -1469,6 +1490,26 @@ impl Config {
         }
         if config.decay.observation_prune_batch == 0 {
             anyhow::bail!("decay.observation_prune_batch must be greater than zero");
+        }
+        // A5 zero-LLM contradiction band (`memory_lint`): both edges must be
+        // finite and inside cosine similarity's own range, and the band must
+        // be non-empty. An inverted or out-of-range band would either
+        // silently disable A5 (no pair ever falls inside an empty range) or
+        // compare against a meaningless similarity value; reject it at load
+        // rather than inside the lint pass.
+        if !config.contradiction_band_min.is_finite()
+            || !config.contradiction_band_max.is_finite()
+            || config.contradiction_band_min < 0.0
+            || config.contradiction_band_max > 1.0
+            || config.contradiction_band_min >= config.contradiction_band_max
+        {
+            anyhow::bail!(
+                "contradiction_band_min/contradiction_band_max must satisfy \
+                 0.0 <= contradiction_band_min < contradiction_band_max <= 1.0 \
+                 (got min={}, max={})",
+                config.contradiction_band_min,
+                config.contradiction_band_max
+            );
         }
         // A4 entropy filter thresholds: reject an unusable threshold at startup
         // rather than silently ignoring it on the first experience pass.
@@ -2639,6 +2680,48 @@ mod tests {
         );
     }
 
+    /// An install that never touched `contradiction_band_min`/`_max` sees no
+    /// change: the defaults are exactly the historical fixed band.
+    #[test]
+    fn contradiction_band_defaults_match_the_historical_fixed_band() {
+        let cfg = Config::default();
+        assert_eq!(
+            cfg.contradiction_band_min,
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW
+        );
+        assert_eq!(
+            cfg.contradiction_band_max,
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH
+        );
+    }
+
+    #[test]
+    fn load_rejects_invalid_contradiction_band() {
+        for (min, max) in [
+            ("0.8", "0.4"),   // min >= max (inverted)
+            ("0.4", "0.4"),   // min >= max (equal)
+            ("-0.1", "0.75"), // min out of range
+            ("0.4", "1.5"),   // max out of range
+            ("nan", "0.75"),  // NaN
+            ("0.4", "nan"),   // NaN
+            ("0.4", "inf"),   // infinite (not finite)
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let config_path = tmp.path().join("config.toml");
+            std::fs::write(
+                &config_path,
+                format!("contradiction_band_min = {min}\ncontradiction_band_max = {max}\n"),
+            )
+            .unwrap();
+            let error = Config::load(Some(&config_path), Some(tmp.path().to_path_buf()))
+                .expect_err(&format!("min={min} max={max} must fail closed"));
+            assert!(
+                error.to_string().contains("contradiction_band"),
+                "unexpected error for min={min} max={max}: {error:#}"
+            );
+        }
+    }
+
     #[test]
     fn load_rejects_destructive_invalid_breadth_weights() {
         for value in ["-0.1", "nan", "inf"] {
@@ -3064,6 +3147,8 @@ mod tests {
             log_level = "debug"
             hook_rate_per_sec = 7.5
             hook_rate_burst = 12.0
+            contradiction_band_min = 0.5
+            contradiction_band_max = 0.8
 
             [auth]
             secure_cookie = true
@@ -3119,6 +3204,8 @@ mod tests {
         assert_eq!(cfg.log_level, "debug");
         assert_eq!(cfg.hook_rate_per_sec, 7.5);
         assert_eq!(cfg.hook_rate_burst, 12.0);
+        assert_eq!(cfg.contradiction_band_min, 0.5);
+        assert_eq!(cfg.contradiction_band_max, 0.8);
         assert!(cfg.auth.secure_cookie);
         assert!(!cfg.maintenance.enabled);
         assert_eq!(cfg.maintenance.lint_interval_secs, 3600);

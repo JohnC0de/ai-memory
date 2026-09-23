@@ -1084,6 +1084,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
         .with_decay_breadth_weight(config.decay.breadth_weight)
         .with_observation_retention(config.decay.observation_retention())
         .with_compact_cold_episodic(config.decay.compact_cold_episodic)
+        .with_contradiction_band(config.contradiction_band_min, config.contradiction_band_max)
         .with_auto_improve_require_approval(config.auto_improve.require_approval)
         .with_auto_improve_review_config(auto_improve_review_config_from_settings(
             &config.auto_improve,
@@ -1117,6 +1118,8 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
         config.decay,
         config.dream,
         activity_clock,
+        config.contradiction_band_min,
+        config.contradiction_band_max,
     )
     .await;
 
@@ -1309,6 +1312,8 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                     embedder: embedder.clone(),
                     provider_health: provider_health.clone(),
                     decay_params,
+                    contradiction_band_min: config.contradiction_band_min,
+                    contradiction_band_max: config.contradiction_band_max,
                     data_dir: config.data_dir.clone(),
                     db_path: store.db_path().to_path_buf(),
                     bind: bind.clone(),
@@ -1637,6 +1642,8 @@ async fn start_maintenance_scheduler(
     decay: crate::config::DecaySettings,
     dream: crate::config::DreamSettings,
     activity_clock: ai_memory_consolidate::ActivityClock,
+    contradiction_band_min: f32,
+    contradiction_band_max: f32,
 ) -> Vec<tokio::task::JoinHandle<()>> {
     let maintenance_enabled = settings.enabled;
     if !maintenance_enabled {
@@ -1799,9 +1806,15 @@ async fn start_maintenance_scheduler(
                     let decay_lambda = decay.decay_params().lambda;
                     async move {
                         let started = std::time::Instant::now();
-                        let outcome =
-                            run_scheduled_lint_tick(&reader, &wiki, llm.as_ref(), decay_lambda)
-                                .await?;
+                        let outcome = run_scheduled_lint_tick(
+                            &reader,
+                            &wiki,
+                            llm.as_ref(),
+                            decay_lambda,
+                            contradiction_band_min,
+                            contradiction_band_max,
+                        )
+                        .await?;
                         if outcome.errors > 0 {
                             anyhow::bail!(
                                 "scheduled rule-based lint had {} scope errors",
@@ -2185,6 +2198,8 @@ async fn run_scheduled_lint_tick(
     wiki: &Wiki,
     llm: Option<&Arc<dyn LlmProvider>>,
     decay_lambda: f64,
+    contradiction_band_min: f32,
+    contradiction_band_max: f32,
 ) -> Result<ScheduledLintTickOutcome> {
     let scopes = reader.list_all_scopes().await?;
     let mut outcome = ScheduledLintTickOutcome {
@@ -2207,6 +2222,8 @@ async fn run_scheduled_lint_tick(
                 // contradiction detector is on for the user-invoked
                 // `memory_lint` / admin lint, not the background sweep.
                 embedding: None,
+                contradiction_band_min,
+                contradiction_band_max,
             },
         )
         .await
@@ -3425,6 +3442,8 @@ mod tests {
             crate::config::DecaySettings::default(),
             crate::config::DreamSettings::default(),
             ai_memory_consolidate::ActivityClock::default(),
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW,
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH,
         )
         .await;
         assert!(tasks.is_empty());
@@ -3471,6 +3490,8 @@ mod tests {
                 crate::config::DecaySettings::default(),
                 crate::config::DreamSettings::default(),
                 ai_memory_consolidate::ActivityClock::default(),
+                ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW,
+                ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH,
             )
             .await;
             // One enabled lint/sweep job plus the independent hollow-project job.
@@ -3968,6 +3989,8 @@ mod tests {
             &wiki,
             Some(&panic_llm),
             ai_memory_store::DecayParams::default().lambda,
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW,
+            ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH,
         )
         .await
         .unwrap();

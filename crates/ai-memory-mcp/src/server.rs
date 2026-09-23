@@ -460,6 +460,13 @@ pub struct AiMemoryServer {
     /// A2 opt-in: compact cold episodic pages (tier-down) instead of evicting
     /// them. Default `false`, so the sweep evicts exactly as before.
     compact_cold_episodic: bool,
+    /// Lower edge of `memory_lint`'s A5 zero-LLM contradiction-similarity
+    /// band, from `config.contradiction_band_min`. Defaults to
+    /// [`ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW`].
+    contradiction_band_min: f32,
+    /// Upper edge of the A5 band — see `contradiction_band_min`. Defaults to
+    /// [`ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH`].
+    contradiction_band_max: f32,
     /// M9 embedder for hybrid query. When `None`, `memory_query`
     /// still fuses FTS5 with entity matches and graph-neighbour expansion.
     embedder: Option<Arc<dyn Embedder>>,
@@ -1640,6 +1647,8 @@ impl AiMemoryServer {
             decay_breadth_weight: 0.0,
             observation_retention: ObservationRetention::default(),
             compact_cold_episodic: false,
+            contradiction_band_min: ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW,
+            contradiction_band_max: ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH,
             embedder: None,
             reranker: None,
             client_activity: Arc::new(std::sync::Mutex::new(ClientActivityBuffer::new())),
@@ -2269,6 +2278,18 @@ impl AiMemoryServer {
     #[must_use]
     pub fn with_compact_cold_episodic(mut self, compact: bool) -> Self {
         self.compact_cold_episodic = compact;
+        self
+    }
+
+    /// Override the A5 zero-LLM contradiction-similarity band (typically
+    /// populated from `config.contradiction_band_min`/`_max`). Unset, it
+    /// defaults to the historical fixed band (see
+    /// [`ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_LOW`] /
+    /// [`ai_memory_consolidate::DEFAULT_CONTRADICTION_SIM_HIGH`]).
+    #[must_use]
+    pub fn with_contradiction_band(mut self, min: f32, max: f32) -> Self {
+        self.contradiction_band_min = min;
+        self.contradiction_band_max = max;
         self
     }
 
@@ -3134,6 +3155,8 @@ impl AiMemoryServer {
                         model: e.model_identity(),
                         dim: e.dim(),
                     }),
+                contradiction_band_min: self.contradiction_band_min,
+                contradiction_band_max: self.contradiction_band_max,
             },
         )
         .await

@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `contradiction_band_min` / `contradiction_band_max` config keys (env:
+  `AI_MEMORY_CONTRADICTION_BAND_MIN` / `AI_MEMORY_CONTRADICTION_BAND_MAX`)
+  make `memory_lint`'s A5 zero-LLM contradiction-detection cosine-similarity
+  band configurable, defaulting to the historical fixed `0.4`–`0.75`. The
+  band is a fixed absolute cosine value, but background similarity is
+  corpus-dependent: on a single-language or single-domain store, unrelated
+  pages already sit above the general-purpose floor, so the default band
+  measures domain proximity more than conflict and produces noisy findings.
+  Raising `contradiction_band_min` trims that noise. Rejected at config load
+  unless `0.0 <= contradiction_band_min < contradiction_band_max <= 1.0` and
+  both are finite. (#853)
 - Fedora users can install prebuilt x86_64 and aarch64 RPMs from GitHub
   Releases, with the existing native systemd service assets. (#858)
 - `embedding_query_prefix` / `embedding_document_prefix` config keys (env:
