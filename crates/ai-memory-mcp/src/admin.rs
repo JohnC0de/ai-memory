@@ -3484,7 +3484,7 @@ async fn handle_lint(
                 .as_ref()
                 .map(|e| ai_memory_consolidate::EmbeddingCoord {
                     provider: e.provider().to_string(),
-                    model: e.model().to_string(),
+                    model: e.model_identity(),
                     dim: e.dim(),
                 }),
         },
@@ -3634,7 +3634,10 @@ async fn handle_embed(
     };
 
     let provider = embedder.provider().to_string();
-    let model = embedder.model().to_string();
+    // Not `.model()`: the purge below must match the identity rows were
+    // actually stored under (a document-prefix change), not the wire
+    // model name. See `Embedder::model_identity`.
+    let model = embedder.model_identity();
     let dim = embedder.dim();
 
     let mut totals = EmbedBackfillCounts::default();
@@ -6266,9 +6269,12 @@ async fn copy_purge_merge(
     let mut src_embeddings: std::collections::HashMap<String, Vec<u8>> =
         std::collections::HashMap::new();
     let embed_meta: Option<(String, String, u32)> = if let Some(embedder) = &state.embedder {
+        // Not `.model()`: only vectors stored under the current document
+        // identity are "current-model" for the carry-over below to load.
+        // See `Embedder::model_identity`.
         let (provider, model, dim) = (
             embedder.provider().to_string(),
-            embedder.model().to_string(),
+            embedder.model_identity(),
             embedder.dim(),
         );
         match state

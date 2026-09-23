@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Fedora users can install prebuilt x86_64 and aarch64 RPMs from GitHub
   Releases, with the existing native systemd service assets. (#858)
+- `embedding_query_prefix` / `embedding_document_prefix` config keys (env:
+  `AI_MEMORY_EMBEDDING_QUERY_PREFIX` / `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX`)
+  for the `openai` and `openai-compat` embedders: an optional string
+  prepended to query / document text before the existing truncation, so
+  truncation still bounds the whole input. Asymmetric embedding models need
+  a query-side instruction their publisher specifies; the OpenAI-compatible
+  `/v1/embeddings` wire format has no field for it.
+  `nvidia/Nemotron-3-Embed-1B-BF16` and base E5 models use a simple
+  `"query: "` / `"passage: "` pair; instruction-tuned E5 variants and
+  Qwen3-Embedding instead need a task-instruction string on the query side
+  only (documents stay plain). Empty by default — no behaviour change when
+  unset, and not trimmed (nor is a present-but-empty env-var override, which
+  now clears a `config.toml` value), so a publisher's trailing space is
+  preserved. A non-empty `embedding_document_prefix` is folded into the
+  stored embedding identity (`Embedder::model_identity`), so a document
+  prefix change makes retrieval, backfill, and cleanup treat existing pages
+  as stale and re-embed them automatically — an empty prefix keeps the
+  pre-existing identity, so upgrading installs need no migration, and a
+  query-only prefix change never needs a rebuild. See
+  `docs/llm-providers.md`. (#859)
 - `auto_improve.patchable_page_prefixes` makes the folders whose page bodies the
   reviewer reads configurable, defaulting to the historical `_rules/` and
   `procedures/`. Only those two folders' contents were ever sent; every other
@@ -58,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capture suppression, like the other context-delivery events. (#840)
 
 ### Fixed
+- `memory_query`'s vector stream called the generic `Embedder::embed`
+  instead of `embed_query` on the configured embedder, so a
+  query/document-asymmetric embedder (Google's task-typed embeddings, or
+  the new query/document prefixes above) embedded the search query on the
+  document side instead of the query side. (#859)
 - Auto-improve review no longer stages a proposal whose LLM-produced page
   path contains a Windows-illegal character (e.g. a `:` copied from a
   conventional-commit subject). That path passed the deliberately tolerant
