@@ -441,6 +441,26 @@ pub struct Config {
     pub embedding_dim: Option<u32>,
     /// Optional embedding base URL override.
     pub embedding_base_url: Option<String>,
+    /// Optional prefix prepended to every embedding **query** before it is
+    /// sent to the `openai` or `openai-compat` embedder, ahead of the
+    /// existing truncation. Unset (the default) is a no-op — no behaviour
+    /// change. Asymmetric self-hosted models — Nemotron-3-Embed, the E5
+    /// family, Qwen3-Embedding — need a `"query: "` instruction their
+    /// publisher specifies; the OpenAI-compatible `/v1/embeddings` wire
+    /// format has no field for it, so the client prepends it instead. Not
+    /// trimmed: a publisher's trailing space (e.g. `"query: "`) is
+    /// significant and preserved verbatim. Ignored by `google` (which has
+    /// its own built-in query/document asymmetry), `voyage`, `local`, and
+    /// `copilot`. Changing this does not change the stored
+    /// `{provider, model, dim}` triple pages are keyed by — run
+    /// `ai-memory embed --force` to re-embed after changing it. See
+    /// `docs/llm-providers.md`. Settable via
+    /// `AI_MEMORY_EMBEDDING_QUERY_PREFIX`.
+    pub embedding_query_prefix: Option<String>,
+    /// Document-side counterpart of `embedding_query_prefix` (e.g.
+    /// `"passage: "` for Nemotron-3-Embed / E5). Settable via
+    /// `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX`.
+    pub embedding_document_prefix: Option<String>,
     /// M8 retention-sweep parameters. The defaults give an ~80-day
     /// "survival floor" for unused episodic content (above the cold
     /// threshold), followed by ~180 days of tombstone grace before permanent
@@ -875,6 +895,8 @@ impl Default for Config {
             embedding_model: None,
             embedding_dim: None,
             embedding_base_url: None,
+            embedding_query_prefix: None,
+            embedding_document_prefix: None,
             decay: DecaySettings::default(),
             maintenance: MaintenanceSettings::default(),
             dream: DreamSettings::default(),
@@ -1881,6 +1903,10 @@ impl Config {
         } else {
             None
         };
+        // Not `non_empty`: that trims, and a publisher's trailing space
+        // (e.g. Nemotron-3-Embed / E5's `"query: "`) is significant.
+        let query_prefix = self.embedding_query_prefix.clone().unwrap_or_default();
+        let document_prefix = self.embedding_document_prefix.clone().unwrap_or_default();
         Ok(Some(EmbedderConfig {
             provider,
             model,
@@ -1890,6 +1916,8 @@ impl Config {
             models_dir: Some(self.data_dir.join("models")),
             copilot_auth,
             defaulted,
+            query_prefix,
+            document_prefix,
         }))
     }
 
@@ -3217,6 +3245,33 @@ mod tests {
             missing_base.embedder_config().unwrap_err(),
             LlmError::NotConfigured(msg) if msg.contains("AI_MEMORY_EMBEDDING_BASE_URL")
         ));
+    }
+
+    #[test]
+    fn embedding_prefixes_default_empty_and_are_not_trimmed_when_set() {
+        // Unset: EmbedderConfig carries empty strings, so downstream
+        // embedders see byte-identical behaviour to before this feature.
+        let unset = Config {
+            embedding_provider: Some("openai-compat".into()),
+            embedding_model: Some("nvidia/nemotron-3-embed".into()),
+            embedding_dim: Some(2048),
+            embedding_base_url: Some("http://localhost:8000/v1".into()),
+            ..Config::default()
+        };
+        let embedder = unset.embedder_config().unwrap().unwrap();
+        assert_eq!(embedder.query_prefix, "");
+        assert_eq!(embedder.document_prefix, "");
+
+        // Set: the publisher's exact strings pass through, including the
+        // significant trailing space — `non_empty`'s trim would corrupt it.
+        let set = Config {
+            embedding_query_prefix: Some("query: ".into()),
+            embedding_document_prefix: Some("passage: ".into()),
+            ..unset
+        };
+        let embedder = set.embedder_config().unwrap().unwrap();
+        assert_eq!(embedder.query_prefix, "query: ");
+        assert_eq!(embedder.document_prefix, "passage: ");
     }
 
     #[test]

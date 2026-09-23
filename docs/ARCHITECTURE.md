@@ -864,6 +864,12 @@ AI_MEMORY_EMBEDDING_MODEL      e.g. text-embedding-3-small, gemini-embedding-001
 AI_MEMORY_EMBEDDING_BASE_URL   optional override; required for openai-compat
 AI_MEMORY_EMBEDDING_DIM        1536 (OpenAI, Copilot), 1024 (Voyage), 768 (Google);
                                required explicitly for openai-compat
+AI_MEMORY_EMBEDDING_QUERY_PREFIX     optional; prepended to query text before
+                                     embedding (openai / openai-compat only)
+AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX  optional; prepended to document text
+                                     before embedding (openai / openai-compat
+                                     only); e.g. "query: " / "passage: " for
+                                     Nemotron-3-Embed / base E5
 OPENAI_API_KEY / VOYAGE_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY
 LLM_API_KEY                    accepted for openai with a custom base URL and as
                                optional bearer auth for openai-compat

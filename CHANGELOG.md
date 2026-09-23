@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `embedding_query_prefix` / `embedding_document_prefix` config keys (env:
+  `AI_MEMORY_EMBEDDING_QUERY_PREFIX` / `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX`)
+  for the `openai` and `openai-compat` embedders: an optional string
+  prepended to query / document text before the existing truncation, so
+  truncation still bounds the whole input. Asymmetric embedding models —
+  Nemotron-3-Embed, the E5 family, Qwen3-Embedding — need a `"query: "` /
+  `"passage: "` instruction their publisher specifies; the
+  OpenAI-compatible `/v1/embeddings` wire format has no field for it.
+  Empty by default — no behaviour change when unset, and not trimmed, so a
+  publisher's trailing space is preserved. Changing a prefix does not
+  change the stored `{provider, model, dim}` triple pages are keyed by;
+  run `ai-memory embed --force` to re-embed after changing one. See
+  `docs/llm-providers.md`.
+
 ### Fixed
+- `memory_query`'s vector stream called the generic `Embedder::embed`
+  instead of `embed_query` on the configured embedder, so a
+  query/document-asymmetric embedder (Google's task-typed embeddings, or
+  the new query/document prefixes above) embedded the search query on the
+  document side instead of the query side.
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
   active developer directory is Command Line Tools only: SwiftUI `@State`
   needs the `SwiftUIMacros` plugin shipped with full Xcode, so the script

@@ -67,6 +67,8 @@ pub struct OpenAiEmbedder {
     base_url: String,
     model: String,
     dim: u32,
+    query_prefix: String,
+    document_prefix: String,
 }
 
 impl OpenAiEmbedder {
@@ -90,6 +92,8 @@ impl OpenAiEmbedder {
             base_url: "https://api.openai.com".into(),
             model: model.into(),
             dim,
+            query_prefix: String::new(),
+            document_prefix: String::new(),
         })
     }
 
@@ -97,6 +101,20 @@ impl OpenAiEmbedder {
     #[must_use]
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
+        self
+    }
+
+    /// Set the query/document prefixes prepended before embedding (see
+    /// [`OpenAiCompatEmbedder::with_prefixes`]). Empty strings are a no-op,
+    /// so this is safe to call unconditionally with the configured values.
+    #[must_use]
+    pub fn with_prefixes(
+        mut self,
+        query_prefix: impl Into<String>,
+        document_prefix: impl Into<String>,
+    ) -> Self {
+        self.query_prefix = query_prefix.into();
+        self.document_prefix = document_prefix.into();
         self
     }
 }
@@ -277,6 +295,32 @@ impl Embedder for OpenAiEmbedder {
         )
         .await
     }
+
+    async fn embed_document(&self, text: &str) -> LlmResult<Vec<f32>> {
+        let prefixed = prepend_prefix(&self.document_prefix, text);
+        openai_style_embed(
+            &self.client,
+            &self.base_url,
+            Some(&self.api_key),
+            &self.model,
+            self.dim,
+            &prefixed,
+        )
+        .await
+    }
+
+    async fn embed_query(&self, text: &str) -> LlmResult<Vec<f32>> {
+        let prefixed = prepend_prefix(&self.query_prefix, text);
+        openai_style_embed(
+            &self.client,
+            &self.base_url,
+            Some(&self.api_key),
+            &self.model,
+            self.dim,
+            &prefixed,
+        )
+        .await
+    }
 }
 
 /// OpenAI-compatible embeddings endpoint (Ollama / LM Studio / vLLM /
@@ -291,6 +335,16 @@ pub struct OpenAiCompatEmbedder {
     base_url: String,
     model: String,
     dim: u32,
+    /// Prepended to every query text before embedding (before truncation).
+    /// Empty by default: symmetric models (most OpenAI-compatible servers)
+    /// see no behaviour change. Asymmetric models such as Nemotron-3-Embed,
+    /// the E5 family, and Qwen3-Embedding require a `"query: "` /
+    /// `"passage: "` (or model-specific) instruction string that the
+    /// OpenAI-compatible `/v1/embeddings` wire format has no field for —
+    /// the client has to prepend it instead. See `with_prefixes`.
+    query_prefix: String,
+    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "`).
+    document_prefix: String,
 }
 
 impl OpenAiCompatEmbedder {
@@ -316,7 +370,29 @@ impl OpenAiCompatEmbedder {
             base_url: base_url.into(),
             model: model.into(),
             dim,
+            query_prefix: String::new(),
+            document_prefix: String::new(),
         })
+    }
+
+    /// Set the strings prepended to query / document text before embedding,
+    /// applied ahead of the existing truncation so truncation still bounds
+    /// the whole request body (prefix included). Pass empty strings for no
+    /// prefix (the default); safe to call unconditionally with a possibly
+    /// unset operator setting.
+    ///
+    /// Publisher-specified prefixes are exact strings, often with a
+    /// significant trailing space (e.g. Nemotron-3-Embed / the E5 family
+    /// use `"query: "` and `"passage: "`) — callers must not trim them.
+    #[must_use]
+    pub fn with_prefixes(
+        mut self,
+        query_prefix: impl Into<String>,
+        document_prefix: impl Into<String>,
+    ) -> Self {
+        self.query_prefix = query_prefix.into();
+        self.document_prefix = document_prefix.into();
+        self
     }
 }
 
@@ -342,6 +418,32 @@ impl Embedder for OpenAiCompatEmbedder {
             &self.model,
             self.dim,
             text,
+        )
+        .await
+    }
+
+    async fn embed_document(&self, text: &str) -> LlmResult<Vec<f32>> {
+        let prefixed = prepend_prefix(&self.document_prefix, text);
+        openai_style_embed(
+            &self.client,
+            &self.base_url,
+            self.api_key.as_ref(),
+            &self.model,
+            self.dim,
+            &prefixed,
+        )
+        .await
+    }
+
+    async fn embed_query(&self, text: &str) -> LlmResult<Vec<f32>> {
+        let prefixed = prepend_prefix(&self.query_prefix, text);
+        openai_style_embed(
+            &self.client,
+            &self.base_url,
+            self.api_key.as_ref(),
+            &self.model,
+            self.dim,
+            &prefixed,
         )
         .await
     }
@@ -501,6 +603,20 @@ impl Embedder for SyntheticEmbedder {
     }
 }
 
+/// Prepend `prefix` to `text` for an asymmetric embedding model, applied
+/// BEFORE [`truncate_for_embedding`] so truncation always bounds the whole
+/// request body (prefix included) rather than letting a prefix push the
+/// text itself past the server's token limit. An empty prefix — the
+/// default — returns `text` unchanged and borrowed, so the unset case
+/// allocates nothing.
+pub(crate) fn prepend_prefix<'a>(prefix: &str, text: &'a str) -> std::borrow::Cow<'a, str> {
+    if prefix.is_empty() {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        std::borrow::Cow::Owned(format!("{prefix}{text}"))
+    }
+}
+
 /// Unit-normalise so dot-product equals cosine similarity.
 pub(crate) fn normalise(mut v: Vec<f32>) -> Vec<f32> {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -591,5 +707,66 @@ mod tests {
         let body = r#"{"data":[{"embedding":[0.1,"oops",0.3]}]}"#;
         let err = parse_openai_embedding_values(body, 200).unwrap_err();
         assert!(matches!(err, LlmError::Provider { status: 200, .. }));
+    }
+
+    #[test]
+    fn prepend_prefix_applies_publisher_instruction() {
+        // Nemotron-3-Embed / the E5 family: exact publisher strings,
+        // including the significant trailing space.
+        assert_eq!(
+            prepend_prefix("query: ", "find the release runbook"),
+            "query: find the release runbook"
+        );
+        assert_eq!(
+            prepend_prefix("passage: ", "the release runbook says..."),
+            "passage: the release runbook says..."
+        );
+    }
+
+    #[test]
+    fn prepend_prefix_unset_leaves_text_unchanged() {
+        // The default (empty prefix) must be a true no-op, byte for byte,
+        // and borrow rather than allocate.
+        let text = "unchanged text";
+        let out = prepend_prefix("", text);
+        assert_eq!(out, text);
+        assert!(matches!(out, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn prefix_is_applied_before_truncation_so_it_still_bounds_the_whole_input() {
+        // A prefix pushes the *total* input closer to the cap; truncation
+        // must run on prefix+text together, never on text alone with the
+        // prefix appended afterwards (which could exceed the server limit).
+        let long_text = "x".repeat(50_000);
+        let prefixed = prepend_prefix("passage: ", &long_text);
+        let truncated = truncate_for_embedding(&prefixed, OPENAI_EMBED_MAX_TOKENS);
+        assert!(truncated.starts_with("passage: "));
+        assert!(truncated.len() <= 8_000, "must respect the hard byte cap");
+        assert!(truncated.ends_with('…'));
+    }
+
+    #[test]
+    fn openai_compat_embedder_defaults_to_no_prefix() {
+        // Construction without `with_prefixes` must be byte-identical to
+        // before this feature existed.
+        let e = OpenAiCompatEmbedder::new("http://localhost:9/v1", None, "nomic-embed-text", 8)
+            .expect("embedder builds");
+        assert_eq!(e.query_prefix, "");
+        assert_eq!(e.document_prefix, "");
+    }
+
+    #[test]
+    fn openai_compat_embedder_stores_configured_prefixes() {
+        let e = OpenAiCompatEmbedder::new(
+            "http://localhost:9/v1",
+            None,
+            "nvidia/nemotron-3-embed",
+            2048,
+        )
+        .expect("embedder builds")
+        .with_prefixes("query: ", "passage: ");
+        assert_eq!(e.query_prefix, "query: ");
+        assert_eq!(e.document_prefix, "passage: ");
     }
 }

@@ -1964,7 +1964,10 @@ impl AiMemoryServer {
         let Some(embedder) = &self.embedder else {
             return None;
         };
-        match embedder.embed(query).await {
+        // `embed_query`, not `embed`: an asymmetric embedder (configured
+        // query/document prefixes, or Google's RETRIEVAL_QUERY task type)
+        // must see this text on the query side, not the document side.
+        match embedder.embed_query(query).await {
             Ok(qv) => Some(qv),
             Err(e) => {
                 tracing::warn!(

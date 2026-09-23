@@ -206,6 +206,17 @@ pub struct EmbedderConfig {
     /// a warning instead of refusing to start; an explicitly configured
     /// one still fails hard.
     pub defaulted: bool,
+    /// Prepended to every query text before embedding, ahead of the
+    /// existing truncation. Empty (the default) is a no-op. Only the
+    /// `openai` and `openai-compat` embedders apply it; other providers
+    /// (`google` has its own built-in task-type asymmetry, `voyage`,
+    /// `local`, `copilot`) ignore it. Needed for asymmetric self-hosted
+    /// models — Nemotron-3-Embed, the E5 family, Qwen3-Embedding — whose
+    /// publisher specifies a `"query: "` instruction the OpenAI-compatible
+    /// `/v1/embeddings` wire format has no field for.
+    pub query_prefix: String,
+    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "`).
+    pub document_prefix: String,
 }
 
 /// Construct an `Arc<dyn Embedder>` from the config.
@@ -221,7 +232,8 @@ pub fn build_embedder(config: EmbedderConfig) -> LlmResult<Arc<dyn Embedder>> {
     }
     let arc: Arc<dyn Embedder> = match config.provider {
         EmbedderChoice::OpenAi => {
-            let mut e = OpenAiEmbedder::new(config.api_key, config.model, config.dim)?;
+            let mut e = OpenAiEmbedder::new(config.api_key, config.model, config.dim)?
+                .with_prefixes(config.query_prefix, config.document_prefix);
             if let Some(url) = config.base_url {
                 e = e.with_base_url(url);
             }
@@ -246,12 +258,10 @@ pub fn build_embedder(config: EmbedderConfig) -> LlmResult<Arc<dyn Embedder>> {
                 .base_url
                 .ok_or_else(|| LlmError::NotConfigured("AI_MEMORY_EMBEDDING_BASE_URL".into()))?;
             let api_key = (!config.api_key.expose_secret().is_empty()).then_some(config.api_key);
-            Arc::new(OpenAiCompatEmbedder::new(
-                base,
-                api_key,
-                config.model,
-                config.dim,
-            )?)
+            Arc::new(
+                OpenAiCompatEmbedder::new(base, api_key, config.model, config.dim)?
+                    .with_prefixes(config.query_prefix, config.document_prefix),
+            )
         }
         #[cfg(feature = "local-embeddings")]
         EmbedderChoice::Local => {

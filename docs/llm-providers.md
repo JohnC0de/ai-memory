@@ -210,6 +210,34 @@ hybrid paths apply the same bounded page-authority adjustment after candidate
 generation; embeddings improve relevance recall but do not decide which source
 is canonical.
 
+Asymmetric embedding models — ones trained with a different instruction for
+queries than for the text being indexed — need that instruction added to the
+text itself; the OpenAI-compatible `/v1/embeddings` wire format has no field
+for it. `AI_MEMORY_EMBEDDING_QUERY_PREFIX` and
+`AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX` (only applied by the `openai` and
+`openai-compat` embedders) are prepended to query and document text
+respectively, before the existing truncation, so a long body is still
+truncated to the same overall input cap with the prefix included. Both are
+empty by default — no behaviour change when unset — and are not trimmed, so
+a publisher's trailing space is preserved exactly. For example, NVIDIA's
+`nemotron-3-embed` (served locally through vLLM/`openai-compat`) specifies
+`"query: "` and `"passage: "`:
+
+```toml
+embedding_provider = "openai-compat"
+embedding_model = "nvidia/nemotron-3-embed"
+embedding_base_url = "http://localhost:8000/v1"
+embedding_dim = 2048
+embedding_query_prefix = "query: "
+embedding_document_prefix = "passage: "
+```
+
+The E5 family and Qwen3-Embedding use the same `"query: "` / `"passage: "`
+convention. Changing either prefix does not change the stored
+`{provider, model, dim}` triple pages are keyed by, so existing vectors keep
+matching on the mismatch check but were embedded under the old (or no)
+prefix; run `ai-memory embed --force` to re-embed after changing one.
+
 `AI_MEMORY_EMBEDDING_PROVIDER=copilot` reuses the same Copilot OAuth login as
 the `copilot` LLM provider (`ai-memory auth login copilot` or
 `COPILOT_GITHUB_TOKEN`/`GITHUB_COPILOT_API_TOKEN`) — no separate API key.
