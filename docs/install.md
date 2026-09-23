@@ -1,12 +1,14 @@
 # Installation cookbook
 
 The [README quick-start](../README.md#quick-start) covers the happy
-paths (Docker + Claude Code, Arch AUR, macOS menu bar app). This page
-covers everything else:
+paths (Docker + Claude Code, Arch AUR, Fedora RPM, macOS menu bar app). This
+page covers everything else:
 
 - [Server on a different machine](#server-on-a-different-machine)
   (homelab, LAN box, remote server)
 - [Configuring the CLI URL and auth](#configuring-the-cli-url-and-auth)
+- [Fedora native package (RPM)](#fedora-rpm)
+  (systemd system service or user service)
 - [Arch Linux native packages (AUR)](#arch-linux-native-packages-aur)
   (systemd system service or user service)
 - [macOS menu bar app](#macos-menu-bar-app)
@@ -197,6 +199,15 @@ take precedence — see
 [the marker-file reference](marker-file.md#install-wide-default-no-marker).
 
 ---
+
+## Fedora (RPM)
+
+Download the `x86_64` or `aarch64` RPM from the
+[latest GitHub release](https://github.com/akitaonrails/ai-memory/releases/latest)
+and install it with `sudo dnf install ./ai-memory-*.rpm`. The package includes
+the binary, hook sources, system and user systemd units, and system service
+configuration. Follow the [user-level service](#user-level-service) or
+[system service](#system-service) steps below to initialize and start it.
 
 ## Arch Linux native packages (AUR)
 
