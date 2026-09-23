@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checksum block, which concatenates every platform's file. The zip's smoke
   test now requires LF rather than tolerating either, so the format the
   release claims is the format it ships. (#838)
+- `purge-session` now removes every page version the session owns at
+  `sessions/<id>.md` (including versions written before OKF sources existed
+  and summaries of sessions that never recorded a summary pointer), while a
+  manual page at the same path survives. (#862)
 
 ## [2.4.0] - 2026-09-21
 
