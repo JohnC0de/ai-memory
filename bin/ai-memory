@@ -586,8 +586,6 @@ for var in \
   AI_MEMORY_EMBEDDING_MODEL \
   AI_MEMORY_EMBEDDING_BASE_URL \
   AI_MEMORY_EMBEDDING_DIM \
-  AI_MEMORY_EMBEDDING_QUERY_PREFIX \
-  AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX \
   AI_MEMORY_ALLOWED_HOSTS \
   AI_MEMORY_WORKSTREAM_ID \
   AI_MEMORY_HOOK_PLATFORM \
@@ -610,6 +608,18 @@ for var in \
   RUST_LOG
 do
   if [ -n "${!var:-}" ]; then
+    ENV_ARGS+=(-e "${var}")
+  fi
+done
+
+# These two are presence-based, not non-empty-based like the loop above: an
+# operator sets one to the empty string to deliberately clear a
+# config.toml-configured prefix without editing the file (see
+# Config::load's figment overlay), and a present-but-empty value must reach
+# the container for that to work — `[ -n ]` above would drop it, making the
+# wrapper indistinguishable from the var never having been set at all.
+for var in AI_MEMORY_EMBEDDING_QUERY_PREFIX AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX; do
+  if [ -n "${!var+x}" ]; then
     ENV_ARGS+=(-e "${var}")
   fi
 done

@@ -337,13 +337,18 @@ pub struct OpenAiCompatEmbedder {
     dim: u32,
     /// Prepended to every query text before embedding (before truncation).
     /// Empty by default: symmetric models (most OpenAI-compatible servers)
-    /// see no behaviour change. Asymmetric models such as Nemotron-3-Embed,
-    /// the E5 family, and Qwen3-Embedding require a `"query: "` /
-    /// `"passage: "` (or model-specific) instruction string that the
-    /// OpenAI-compatible `/v1/embeddings` wire format has no field for —
-    /// the client has to prepend it instead. See `with_prefixes`.
+    /// see no behaviour change. Asymmetric models need a query-side
+    /// instruction the OpenAI-compatible `/v1/embeddings` wire format has
+    /// no field for — the client has to prepend it instead.
+    /// `nvidia/Nemotron-3-Embed-1B-BF16` and base E5 models use a simple
+    /// `"query: "` / `"passage: "` pair; `e5-mistral-7b-instruct` and
+    /// Qwen3-Embedding instead need a full task-instruction string with
+    /// different exact spacing each (documents plain for both — see
+    /// `ai-memory-cli/src/config.rs`'s `embedding_query_prefix` field doc
+    /// comment for the two exact templates). See `with_prefixes`.
     query_prefix: String,
-    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "`).
+    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "` for
+    /// Nemotron-3-Embed / base E5 — not every model needs one).
     document_prefix: String,
 }
 
@@ -648,6 +653,41 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 mod tests {
     use super::*;
 
+    /// Transport-level proof that `OpenAiEmbedder` (not just
+    /// `OpenAiCompatEmbedder`, covered in
+    /// `tests/suite/openai_compat_embedder.rs`) actually sends the
+    /// configured prefix on the wire — `with_prefixes` alone only proves
+    /// the fields are stored, not that `embed_query`/`embed_document` use
+    /// them in the real HTTP request body.
+    #[tokio::test]
+    async fn openai_embedder_sends_the_prefix_on_the_wire() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(move |req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                assert_eq!(body["input"], "query: find the runbook");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "data": [{ "embedding": vec![0.5_f32; 4] }],
+                }))
+            })
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let e = OpenAiEmbedder::new(SecretString::from("sk-test"), "text-embedding-3-small", 4)
+            .unwrap()
+            .with_base_url(server.uri())
+            .with_prefixes("query: ", "passage: ");
+
+        e.embed_query("find the runbook")
+            .await
+            .expect("embed_query succeeds");
+    }
+
     #[tokio::test]
     async fn synthetic_embedder_produces_unit_vectors() {
         let e = SyntheticEmbedder::new(64);
@@ -761,7 +801,7 @@ mod tests {
         let e = OpenAiCompatEmbedder::new(
             "http://localhost:9/v1",
             None,
-            "nvidia/nemotron-3-embed",
+            "nvidia/Nemotron-3-Embed-1B-BF16",
             2048,
         )
         .expect("embedder builds")

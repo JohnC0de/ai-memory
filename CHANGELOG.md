@@ -12,15 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AI_MEMORY_EMBEDDING_QUERY_PREFIX` / `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX`)
   for the `openai` and `openai-compat` embedders: an optional string
   prepended to query / document text before the existing truncation, so
-  truncation still bounds the whole input. Asymmetric embedding models —
-  Nemotron-3-Embed, the E5 family, Qwen3-Embedding — need a `"query: "` /
-  `"passage: "` instruction their publisher specifies; the
-  OpenAI-compatible `/v1/embeddings` wire format has no field for it.
-  Empty by default — no behaviour change when unset, and not trimmed, so a
-  publisher's trailing space is preserved. Changing a prefix does not
-  change the stored `{provider, model, dim}` triple pages are keyed by;
-  run `ai-memory embed --force` to re-embed after changing one. See
-  `docs/llm-providers.md`.
+  truncation still bounds the whole input. Asymmetric embedding models need
+  a query-side instruction their publisher specifies; the OpenAI-compatible
+  `/v1/embeddings` wire format has no field for it.
+  `nvidia/Nemotron-3-Embed-1B-BF16` and base E5 models use a simple
+  `"query: "` / `"passage: "` pair; instruction-tuned E5 variants and
+  Qwen3-Embedding instead need a task-instruction string on the query side
+  only (documents stay plain). Empty by default — no behaviour change when
+  unset, and not trimmed (nor is a present-but-empty env-var override,
+  which now clears a `config.toml` value), so a publisher's trailing space
+  is preserved. Changing a prefix does not change the stored
+  `{provider, model, dim}` triple pages are keyed by; run `ai-memory embed
+  --force` to re-embed after changing one. See `docs/llm-providers.md`.
 
 ### Fixed
 - `memory_query`'s vector stream called the generic `Embedder::embed`

@@ -211,11 +211,17 @@ pub struct EmbedderConfig {
     /// `openai` and `openai-compat` embedders apply it; other providers
     /// (`google` has its own built-in task-type asymmetry, `voyage`,
     /// `local`, `copilot`) ignore it. Needed for asymmetric self-hosted
-    /// models — Nemotron-3-Embed, the E5 family, Qwen3-Embedding — whose
-    /// publisher specifies a `"query: "` instruction the OpenAI-compatible
-    /// `/v1/embeddings` wire format has no field for.
+    /// models whose publisher specifies a query-side instruction the
+    /// OpenAI-compatible `/v1/embeddings` wire format has no field for.
+    /// `nvidia/Nemotron-3-Embed-1B-BF16` and base E5 models
+    /// (`intfloat/e5-base-v2`, multilingual E5, …) use a simple
+    /// `"query: "` string; instruction-tuned E5 variants and
+    /// Qwen3-Embedding instead need a full task-instruction string (their
+    /// documents stay plain — leave `document_prefix` unset for those).
     pub query_prefix: String,
-    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "`).
+    /// Document-side counterpart of `query_prefix` (e.g. `"passage: "` for
+    /// Nemotron-3-Embed / base E5 — not every model needs one; see
+    /// `query_prefix`'s doc comment).
     pub document_prefix: String,
 }
 

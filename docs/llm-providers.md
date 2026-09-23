@@ -220,20 +220,39 @@ respectively, before the existing truncation, so a long body is still
 truncated to the same overall input cap with the prefix included. Both are
 empty by default — no behaviour change when unset — and are not trimmed, so
 a publisher's trailing space is preserved exactly. For example, NVIDIA's
-`nemotron-3-embed` (served locally through vLLM/`openai-compat`) specifies
-`"query: "` and `"passage: "`:
+[`nvidia/Nemotron-3-Embed-1B-BF16`](https://huggingface.co/nvidia/Nemotron-3-Embed-1B-BF16)
+(2048-dim, served locally through vLLM/`openai-compat`) specifies
+`"query: "` for queries and `"passage: "` for documents per its model card:
 
 ```toml
 embedding_provider = "openai-compat"
-embedding_model = "nvidia/nemotron-3-embed"
+embedding_model = "nvidia/Nemotron-3-Embed-1B-BF16"
 embedding_base_url = "http://localhost:8000/v1"
 embedding_dim = 2048
 embedding_query_prefix = "query: "
 embedding_document_prefix = "passage: "
 ```
 
-The E5 family and Qwen3-Embedding use the same `"query: "` / `"passage: "`
-convention. Changing either prefix does not change the stored
+Base E5 models (`intfloat/e5-base-v2`, `e5-large-v2`, multilingual E5, …)
+use the same `"query: "` / `"passage: "` convention. Instruction-tuned E5
+variants and Qwen3-Embedding instead need a task-instruction string on the
+**query side only** — their documents are embedded plain, with no document
+prefix — but the two use **different exact spacing**, confirmed against
+each model card:
+
+- `intfloat/e5-mistral-7b-instruct`:
+  `embedding_query_prefix = "Instruct: {task description}\nQuery: "` — a
+  trailing space after `Query:`.
+- `Qwen/Qwen3-Embedding-0.6B` (and the other Qwen3-Embedding sizes):
+  `embedding_query_prefix = "Instruct: {task description}\nQuery:"` — **no**
+  trailing space; the query text follows the colon directly.
+
+Fill in your own task description for `{task description}`, leave
+`embedding_document_prefix` unset for both, and don't copy one model's
+exact string for the other — the trailing-space difference is
+publisher-specified, not a typo.
+
+Changing either prefix does not change the stored
 `{provider, model, dim}` triple pages are keyed by, so existing vectors keep
 matching on the mismatch check but were embedded under the old (or no)
 prefix; run `ai-memory embed --force` to re-embed after changing one.
