@@ -1170,6 +1170,10 @@ const FIXTURE_TOOLS: &[&str] = &[
     "awk", "bash", "cat", "chmod", "env", "git", "grep", "mkdir", "mktemp", "mv", "sort", "uname",
 ];
 
+/// The runner's last line, which hands over to the installed hook.
+#[cfg(any(unix, windows))]
+const RUNNER_EXEC: &str = "exec bash \"$AI_MEMORY_FIXTURE_HOOK\"\n";
+
 /// Give up on the pre-push tests, or refuse to.
 ///
 /// A contributor whose machine lacks Git Bash or a fixture tool gets a skip,
@@ -1528,7 +1532,10 @@ impl PrePushFixture {
   printf '{name}-begin\n'
   env | grep '^GIT_' | LC_ALL=C sort
   printf '{name}-end\n'
-  printf '{name}-ifs:[%s]\n' "$IFS"
+  printf '{name}-ifs:[%s]\n' "${{IFS-<unset>}}"
+  printf '{name}-opts:[%s]\n' "$-"
+  printf '{name}-pipefail:[%s]\n' "$([[ -o pipefail ]] && echo on || echo off)"
+  printf '{name}-ssl:[%s]\n' "${{SSL_CERT_FILE-<unset>}}"
   printf '{name}-toplevel:%s\n' "$(git -C "$AI_MEMORY_FIXTURE_REPO" rev-parse --show-toplevel 2>&1)"
   printf '{name}-injected:%s\n' "$(git -C "$AI_MEMORY_FIXTURE_REPO" config --get fixture.injected 2>&1)"
   printf '{name}-counted:%s\n' "$(git -C "$AI_MEMORY_FIXTURE_REPO" config --get fixture.counted 2>&1)"
@@ -1558,8 +1565,26 @@ impl PrePushFixture {
         if with_nextest {
             runner.push_str("cargo-nextest() { return 0; }\nexport -f cargo-nextest\n");
         }
-        runner.push_str("exec bash \"$AI_MEMORY_FIXTURE_HOOK\"\n");
+        runner.push_str(RUNNER_EXEC);
         std::fs::write(&self.runner, runner).unwrap();
+    }
+
+    /// Make the hook's `git rev-parse --local-env-vars` fail with `code`. The
+    /// exported function shadows `git` for that one call and defers to the real
+    /// binary for everything else, including the probes.
+    fn fail_local_env_vars(&self, code: i32) {
+        let runner = std::fs::read_to_string(&self.runner).unwrap();
+        let prelude = runner
+            .strip_suffix(RUNNER_EXEC)
+            .expect("write_runner must run first");
+        let git = format!(
+            "git() {{\n\
+             \x20 if [ \"$1\" = rev-parse ] && [ \"$2\" = --local-env-vars ]; then return {code}; fi\n\
+             \x20 command git \"$@\"\n\
+             }}\n\
+             export -f git\n"
+        );
+        std::fs::write(&self.runner, format!("{prelude}{git}{RUNNER_EXEC}")).unwrap();
     }
 
     /// Seed a user hook whose own content precedes the managed block.
@@ -1761,6 +1786,16 @@ fn pre_push_hook_leaves_the_user_hook_environment_intact_around_the_block() {
             );
         }
     }
+    // The block's own shell options and exports stay inside it too: the block
+    // is replaced in place, so user commands after it run with whatever it
+    // leaves behind.
+    for key in ["opts", "pipefail", "ssl"] {
+        assert_eq!(
+            log_field(&log, &format!("after-{key}")),
+            log_field(&log, &format!("before-{key}")),
+            "the managed block's {key} leaked into the trailing user content:\n{log}"
+        );
+    }
 }
 
 #[test]
@@ -1819,6 +1854,39 @@ fn pre_push_hook_reinstall_keeps_user_content_and_one_managed_block() {
     let failed = fixture.run_hook();
     assert_eq!(failed.status.code(), Some(29));
     assert!(!String::from_utf8_lossy(&failed.stdout).contains("order-after"));
+}
+
+#[test]
+#[cfg(any(unix, windows))]
+fn pre_push_hook_stops_before_cargo_and_user_content_when_the_scrub_fails() {
+    let Some(fixture) = PrePushFixture::new() else {
+        return;
+    };
+    fixture.write_runner(0, false);
+    fixture.fail_local_env_vars(23);
+    // No `set -e` in the user hook: the block alone has to stop the push.
+    fixture.write_user_hook("");
+    fixture.install_hook();
+    fixture.append_after_managed_block();
+
+    let output = fixture.run_hook();
+    assert_eq!(
+        output.status.code(),
+        Some(23),
+        "a failed scrub must fail the hook: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !fixture.cargo_log().contains("cargo-argv:"),
+        "Cargo ran without the scrub:\n{}",
+        fixture.cargo_log()
+    );
+    let caller = fixture.caller_log();
+    assert!(
+        caller.contains("before-begin") && !caller.contains("after-begin"),
+        "the user's trailing content ran after the block failed:\n{caller}"
+    );
 }
 
 #[test]

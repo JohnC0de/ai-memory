@@ -17,6 +17,8 @@ if git config --get core.hooksPath >/dev/null; then
     echo 'core.hooksPath is set; this installer only manages the shared repository hook directory' >&2
     exit 1
 else
+    # `$?` is still the condition's status here: 1 means the key is unset, and
+    # anything else is a Git failure the installer must not guess past.
     config_status=$?
     if [[ "$config_status" -ne 1 ]]; then
         exit "$config_status"
@@ -29,21 +31,24 @@ end="# <<< ai-memory pre-push <<<"
 managed_block=$(cat <<'HOOK'
 # >>> ai-memory pre-push >>>
 # Runs the full test tier before a push. See scripts/install-git-hooks.sh.
-set -euo pipefail
-
-# macOS: stop reqwest re-reading the Keychain in every test process.
-if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && [ -z "${SSL_CERT_FILE:-}" ] && [ -f /etc/ssl/cert.pem ]; then
-    export SSL_CERT_FILE=/etc/ssl/cert.pem
-fi
 
 # Git's hook environment would redirect fixture commands into this checkout.
-# Isolate Cargo and its children so other hook code keeps its Git context.
+# Isolate Cargo and its children, and keep this block's shell options and
+# exports away from user hook code around it.
 (
+    set -euo pipefail
+
+    # macOS: stop reqwest re-reading the Keychain in every test process.
+    if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] && [ -z "${SSL_CERT_FILE:-}" ] && [ -f /etc/ssl/cert.pem ]; then
+        export SSL_CERT_FILE=/etc/ssl/cert.pem
+    fi
+
     # A plain assignment, so `set -e` still aborts if `git rev-parse` fails.
     git_local_env_vars=$(git rev-parse --local-env-vars)
     # A surrounding user hook may have narrowed IFS; the list below is split on
-    # newlines, so restore the default before splitting it.
-    IFS=$' \t\n'
+    # newlines, so fall back to the default before splitting it. Unset rather
+    # than assigned: Bash 3.2 expands ANSI-C quoting inside this heredoc.
+    unset IFS
     # Unquoted on purpose: the output is one variable name per line.
     for git_local_env_var in $git_local_env_vars; do
         unset "$git_local_env_var"
@@ -60,6 +65,14 @@ fi
         cargo test --workspace --all-targets
     fi
 )
+# Bash ignores `set -e` inside a subshell tested by `||`, `&&`, `!` or `if`, so
+# the subshell stays a plain command and its status is propagated here. A user
+# hook without `set -e` would otherwise run on and let the push through.
+ai_memory_pre_push_status=$?
+if [ "$ai_memory_pre_push_status" -ne 0 ]; then
+    exit "$ai_memory_pre_push_status"
+fi
+unset ai_memory_pre_push_status
 # <<< ai-memory pre-push <<<
 HOOK
 )
@@ -69,6 +82,7 @@ if [[ -f "$hook" ]]; then
     if grep -q '[^[:space:]]' "$hook"; then
         has_content=1
     else
+        # As above, `$?` is grep's status: 1 is a blank hook, 2 a read error.
         read_status=$?
         if [[ "$read_status" -ne 1 ]]; then
             exit "$read_status"

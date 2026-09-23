@@ -88,7 +88,9 @@ Bypass it on a work-in-progress branch with `git push --no-verify`.
 The managed test block clears Git's repository environment and disables global
 and system Git configuration for Cargo and its children. Fixture commands can
 then use their own repositories without inheriting the checkout being pushed.
-The publishing Git process and other hook code retain their configuration.
+The publishing Git process and other hook code retain their configuration, and
+the block's shell options stay inside it; a failing test run still fails the
+hook even when your own commands follow the block without `set -e`.
 Run the installer again to update an existing installation.
 
 Integration tests live in `tests/suite/` per crate and compile into the
