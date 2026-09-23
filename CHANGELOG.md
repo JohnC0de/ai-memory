@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Fedora users can install prebuilt x86_64 and aarch64 RPMs from GitHub
+  Releases, with the existing native systemd service assets. (#858)
 - `auto_improve.patchable_page_prefixes` makes the folders whose page bodies the
   reviewer reads configurable, defaulting to the historical `_rules/` and
   `procedures/`. Only those two folders' contents were ever sent; every other
