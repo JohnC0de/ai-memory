@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ai-memory run` accepts a repeatable `--env KEY=VALUE` and an `--env-file
+  <path>` (blank lines and `#` comments skipped) to pass extra environment
+  into the spawned harness — e.g. a per-account `CLAUDE_CONFIG_DIR` for
+  callers who previously had to wrap the launch in `env KEY=VAL harness`.
+  Both flags are wrapper-owned like `--yolo`/`--executable` and must precede
+  the harness name; a `--env` entry overrides a same-key `--env-file` line.
+  The resolved environment reaches both the spawned process and ai-memory's
+  own native-session resolution, so the two agree on where a
+  `CLAUDE_CONFIG_DIR`-style override points the session store. See
+  `docs/managed-workstreams.md`. (#820)
 - Fedora users can install prebuilt x86_64 and aarch64 RPMs from GitHub
   Releases, with the existing native systemd service assets. (#858)
 - `embedding_query_prefix` / `embedding_document_prefix` config keys (env:
