@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   document vectors and the vector stream could not separate query from
   passage. Indexed writes are unchanged; only the query-side helper moves
   onto `RETRIEVAL_QUERY`. Symmetric embedders (OpenAI, Voyage, local) keep
-  the same vector they already returned from `embed()`.
+  the same vector they already returned from `embed()`. (#861)
 - Auto-improve review no longer stages a proposal whose LLM-produced page
   path contains a Windows-illegal character (e.g. a `:` copied from a
   conventional-commit subject). That path passed the deliberately tolerant
