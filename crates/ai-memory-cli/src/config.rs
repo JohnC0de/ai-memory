@@ -471,11 +471,17 @@ pub struct Config {
     pub embedding_query_prefix: Option<String>,
     /// Document-side counterpart of `embedding_query_prefix` (e.g.
     /// `"passage: "` for Nemotron-3-Embed / base E5; see that field's doc
-    /// comment for which models this applies to). Changing this does not
-    /// change the stored `{provider, model, dim}` triple pages are keyed
-    /// by — run `ai-memory embed --force` to re-embed after changing it.
-    /// Settable via `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX` (same raw-env
-    /// overlay as `embedding_query_prefix`).
+    /// comment for which models this applies to). Unlike the query prefix,
+    /// this one IS folded into the stored embedding identity
+    /// (`Embedder::model_identity`): a non-empty value makes newly
+    /// embedded pages distinguishable from ones embedded before the
+    /// change (or under a different prefix), so `memory_query` and
+    /// `ai-memory embed`'s stale-row detection both treat a document-prefix
+    /// change like a model change — no manual `--force` needed, and an
+    /// empty value keeps the pre-existing (legacy) identity so upgrading
+    /// installs need no migration. Settable via
+    /// `AI_MEMORY_EMBEDDING_DOCUMENT_PREFIX` (same raw-env overlay as
+    /// `embedding_query_prefix`).
     pub embedding_document_prefix: Option<String>,
     /// M8 retention-sweep parameters. The defaults give an ~80-day
     /// "survival floor" for unused episodic content (above the cold

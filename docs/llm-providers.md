@@ -252,10 +252,16 @@ Fill in your own task description for `{task description}`, leave
 exact string for the other — the trailing-space difference is
 publisher-specified, not a typo.
 
-Changing either prefix does not change the stored
-`{provider, model, dim}` triple pages are keyed by, so existing vectors keep
-matching on the mismatch check but were embedded under the old (or no)
-prefix; run `ai-memory embed --force` to re-embed after changing one.
+Changing `embedding_query_prefix` alone never requires re-embedding: only
+`embedding_document_prefix` is folded into the stored embedding identity
+(a non-empty value changes what `ai-memory` treats as the current
+`{provider, model, dim}` triple for that page's vectors), so a document
+prefix change makes `memory_query` stop matching the old vectors and the
+next `ai-memory embed` (scheduled or manual) pass re-embed them
+automatically — no `--force` needed. `--force` remains useful to
+re-embed everything immediately rather than waiting for scheduled
+backfill, or to force a re-embed for a reason the triple alone doesn't
+capture (e.g. touching up the vLLM server's tokenizer or quantization).
 
 `AI_MEMORY_EMBEDDING_PROVIDER=copilot` reuses the same Copilot OAuth login as
 the `copilot` LLM provider (`ai-memory auth login copilot` or

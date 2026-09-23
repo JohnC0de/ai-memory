@@ -18,6 +18,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use crate::error::{LlmError, LlmResult};
@@ -39,8 +40,34 @@ pub trait Embedder: Send + Sync {
     /// Short identifier (e.g. `openai`, `voyage`, `synthetic`).
     fn provider(&self) -> &'static str;
 
-    /// Model identifier (e.g. `text-embedding-3-small`).
+    /// Model identifier (e.g. `text-embedding-3-small`). The exact string
+    /// sent on the wire — never suffixed or altered. See
+    /// [`Self::model_identity`] for the value that should be stored
+    /// alongside a vector or used to select eligible stored vectors.
     fn model(&self) -> &str;
+
+    /// The `model` component of the stored/matched `(provider, model, dim)`
+    /// identity for a **document** embedding — distinct from [`Self::model`]
+    /// (the wire model name) whenever the effective document-side input
+    /// text is not what the model id alone implies. Defaults to
+    /// `self.model().to_string()`: providers with no such distinction (every
+    /// provider except the two below) are unaffected.
+    ///
+    /// `OpenAiEmbedder`/`OpenAiCompatEmbedder` override this to fold in a
+    /// fingerprint of their configured `document_prefix` when it is
+    /// non-empty, so a page embedded under one document prefix is never
+    /// silently matched against, or mixed with, vectors embedded under a
+    /// different (or no) prefix — the same `(provider, model, dim)`
+    /// refuse-on-mismatch and stale-row machinery that already protects
+    /// against a plain model swap now also protects against a document
+    /// prefix change. An empty prefix reproduces `self.model()` exactly
+    /// (the pre-existing identity), so upgrading installs with no prefix
+    /// configured need no migration. The **query** prefix never affects
+    /// this: only the text actually embedded and stored needs a distinct
+    /// identity, and a query is never stored.
+    fn model_identity(&self) -> String {
+        self.model().to_string()
+    }
 
     /// Vector dimensionality.
     fn dim(&self) -> u32;
@@ -280,6 +307,10 @@ impl Embedder for OpenAiEmbedder {
         &self.model
     }
 
+    fn model_identity(&self) -> String {
+        document_prefix_identity(&self.model, &self.document_prefix)
+    }
+
     fn dim(&self) -> u32 {
         self.dim
     }
@@ -409,6 +440,10 @@ impl Embedder for OpenAiCompatEmbedder {
 
     fn model(&self) -> &str {
         &self.model
+    }
+
+    fn model_identity(&self) -> String {
+        document_prefix_identity(&self.model, &self.document_prefix)
     }
 
     fn dim(&self) -> u32 {
@@ -622,6 +657,35 @@ pub(crate) fn prepend_prefix<'a>(prefix: &str, text: &'a str) -> std::borrow::Co
     }
 }
 
+/// The `model` component of the stored embedding identity for a document
+/// embedder configured with `document_prefix`. An empty prefix returns
+/// `model` unchanged — the pre-existing identity, so an install with no
+/// document prefix configured needs no migration. A non-empty prefix
+/// appends a versioned SHA-256 fingerprint of the prefix bytes: `+dp1-`
+/// followed by the first 16 hex characters (64 bits) of
+/// `SHA-256(document_prefix)`. Not the raw prefix text itself, which
+/// could be long, contain characters awkward in a stored column, or leak
+/// an operator's exact instruction string into logs/admin output more
+/// than necessary — and not a 32-bit hash (an earlier revision used
+/// `fnv1a` truncated to 32 bits, which a search for a same-length ASCII
+/// collision found in minutes: `"Document category 5hvhw0: "` and
+/// `"Document category 1i4yh8i: "` both fingerprinted to `5c7f37a2`,
+/// which would have silently mixed two different prefixes' vectors under
+/// one identity — see `document_prefix_identity_does_not_collide_on_the_known_fnv32_pair`
+/// below). SHA-256 truncated to 64 bits keeps the collision probability
+/// negligible for the small number of prefixes one deployment actually
+/// configures over time, without needing the full 256-bit digest in a
+/// column meant to stay human-scannable. The `dp1` version tag lets a
+/// future change to this scheme be distinguished from today's rather than
+/// risking a silent collision with an old identity under a new one.
+pub(crate) fn document_prefix_identity(model: &str, document_prefix: &str) -> String {
+    if document_prefix.is_empty() {
+        return model.to_string();
+    }
+    let digest = format!("{:x}", Sha256::digest(document_prefix.as_bytes()));
+    format!("{model}+dp1-{}", &digest[..16])
+}
+
 /// Unit-normalise so dot-product equals cosine similarity.
 pub(crate) fn normalise(mut v: Vec<f32>) -> Vec<f32> {
     let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -652,6 +716,109 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn document_prefix_identity_is_unchanged_when_the_prefix_is_empty() {
+        // The legacy-identity guarantee: an install with no document
+        // prefix configured must key its vectors exactly as before this
+        // feature, so it needs no migration.
+        assert_eq!(
+            document_prefix_identity("nomic-embed-text", ""),
+            "nomic-embed-text"
+        );
+    }
+
+    #[test]
+    fn document_prefix_identity_changes_deterministically_with_the_prefix() {
+        let base = document_prefix_identity("nomic-embed-text", "passage: ");
+        assert_ne!(
+            base, "nomic-embed-text",
+            "a set prefix must not reuse the legacy identity"
+        );
+        assert!(base.starts_with("nomic-embed-text+dp1-"));
+        // Deterministic: the same (model, prefix) always produces the same
+        // identity, so pages embedded in different requests still land
+        // under one queryable identity.
+        assert_eq!(
+            base,
+            document_prefix_identity("nomic-embed-text", "passage: ")
+        );
+    }
+
+    #[test]
+    fn document_prefix_identity_distinguishes_different_prefixes() {
+        // Two distinct document prefixes on the same model must not
+        // collide — otherwise a prefix *change* would look like no change
+        // at all to the refuse-on-mismatch / stale-row machinery.
+        let a = document_prefix_identity("nomic-embed-text", "passage: ");
+        let b = document_prefix_identity("nomic-embed-text", "document: ");
+        assert_ne!(a, b);
+    }
+
+    /// Regression test for a real collision found in an earlier revision
+    /// of `document_prefix_identity`, which truncated `fnv1a` to 32 bits:
+    /// `"Document category 5hvhw0: "` and `"Document category 1i4yh8i: "`
+    /// both fingerprinted to `5c7f37a2` (verified independently in
+    /// Python), which would have silently mixed the two prefixes' vectors
+    /// under one stored identity. The SHA-256-based fingerprint here does
+    /// not collide on this pair (also independently verified: their first
+    /// 16 hex characters are `b32006f5a41f3d24` and `513594f86d5883fd`).
+    #[test]
+    fn document_prefix_identity_does_not_collide_on_the_known_fnv32_pair() {
+        let a = document_prefix_identity("nomic-embed-text", "Document category 5hvhw0: ");
+        let b = document_prefix_identity("nomic-embed-text", "Document category 1i4yh8i: ");
+        assert_ne!(
+            a, b,
+            "these two prefixes collided under the old 32-bit fnv1a fingerprint; \
+             the new SHA-256-based one must not repeat that collision"
+        );
+    }
+
+    #[test]
+    fn model_identity_defaults_to_model_for_providers_without_prefixes() {
+        // Providers that never got the document-prefix override (google,
+        // voyage, local, copilot, synthetic) must see byte-identical
+        // behaviour: `model_identity` defaults to `model().to_string()`.
+        let e = SyntheticEmbedder::new(8);
+        assert_eq!(e.model_identity(), e.model());
+    }
+
+    #[test]
+    fn openai_compat_embedder_model_identity_reflects_the_document_prefix() {
+        let unset = OpenAiCompatEmbedder::new("http://localhost:9/v1", None, "nomic-embed-text", 8)
+            .expect("embedder builds");
+        assert_eq!(unset.model_identity(), "nomic-embed-text");
+
+        let with_prefix =
+            OpenAiCompatEmbedder::new("http://localhost:9/v1", None, "nomic-embed-text", 8)
+                .expect("embedder builds")
+                .with_prefixes("query: ", "passage: ");
+        assert_ne!(with_prefix.model_identity(), "nomic-embed-text");
+        assert_eq!(
+            with_prefix.model_identity(),
+            document_prefix_identity("nomic-embed-text", "passage: ")
+        );
+        // The query prefix must NOT affect the stored identity — only
+        // documents are stored; a query is never persisted.
+        let query_only =
+            OpenAiCompatEmbedder::new("http://localhost:9/v1", None, "nomic-embed-text", 8)
+                .expect("embedder builds")
+                .with_prefixes("query: ", "");
+        assert_eq!(query_only.model_identity(), "nomic-embed-text");
+    }
+
+    #[test]
+    fn openai_embedder_model_identity_reflects_the_document_prefix() {
+        let unset =
+            OpenAiEmbedder::new(SecretString::from("k"), "text-embedding-3-small", 1536).unwrap();
+        assert_eq!(unset.model_identity(), "text-embedding-3-small");
+
+        let with_prefix =
+            OpenAiEmbedder::new(SecretString::from("k"), "text-embedding-3-small", 1536)
+                .unwrap()
+                .with_prefixes("query: ", "passage: ");
+        assert_ne!(with_prefix.model_identity(), "text-embedding-3-small");
+    }
 
     /// Transport-level proof that `OpenAiEmbedder` (not just
     /// `OpenAiCompatEmbedder`, covered in

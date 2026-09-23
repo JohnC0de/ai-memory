@@ -1633,7 +1633,7 @@ async fn start_maintenance_scheduler(
         .as_ref()
         .map(|e| ai_memory_consolidate::EmbeddingCoord {
             provider: e.provider().to_string(),
-            model: e.model().to_string(),
+            model: e.model_identity(),
             dim: e.dim(),
         });
 
@@ -2367,11 +2367,15 @@ async fn configure_embedder(
         }
         Err(e) => return Err(e).context("building embedder from config"),
     };
+    // Not `.model()`: the running triple must match what pages are
+    // actually stored under, which a configured document prefix changes.
+    // See `Embedder::model_identity`.
+    let configured_model_identity = embedder.model_identity();
     let mismatch = store
         .reader
         .embedding_meta_for_mismatch(
             embedder.provider().into(),
-            embedder.model().into(),
+            configured_model_identity.clone(),
             embedder.dim(),
         )
         .await?;
@@ -2383,7 +2387,7 @@ async fn configure_embedder(
         tracing::warn!(
             stored = ?mismatch,
             configured_provider = embedder.provider(),
-            configured_model = embedder.model(),
+            configured_model = %configured_model_identity,
             configured_dim = embedder.dim(),
             "stored embeddings use a different (provider, model, dim) than configured; \
              hybrid search ignores stale rows until pages are re-embedded — \
@@ -3999,7 +4003,7 @@ mod tests {
                     ws,
                     project,
                     embedder.provider().to_string(),
-                    embedder.model().to_string(),
+                    embedder.model_identity(),
                     embedder.dim(),
                 )
                 .await

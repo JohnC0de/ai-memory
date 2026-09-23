@@ -1995,7 +1995,11 @@ impl AiMemoryServer {
         // eligible; with no query vector the vector stream never runs,
         // so the empty triple is inert rather than a fake identity.
         let (provider, model, dim) = match (&self.embedder, options.query_vec) {
-            (Some(e), Some(_)) => (e.provider().to_string(), e.model().to_string(), e.dim()),
+            // Not `.model()`: eligible stored vectors are keyed by the
+            // DOCUMENT identity they were embedded under, which a
+            // configured document prefix folds in. See
+            // `Embedder::model_identity`.
+            (Some(e), Some(_)) => (e.provider().to_string(), e.model_identity(), e.dim()),
             _ => (String::new(), String::new(), 0),
         };
         let fused: Vec<(PageHit, Option<ai_memory_store::SearchExplain>)> = if options.explain {
@@ -3084,7 +3088,7 @@ impl AiMemoryServer {
                     .as_ref()
                     .map(|e| ai_memory_consolidate::EmbeddingCoord {
                         provider: e.provider().to_string(),
-                        model: e.model().to_string(),
+                        model: e.model_identity(),
                         dim: e.dim(),
                     }),
             },

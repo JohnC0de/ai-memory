@@ -19,11 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"query: "` / `"passage: "` pair; instruction-tuned E5 variants and
   Qwen3-Embedding instead need a task-instruction string on the query side
   only (documents stay plain). Empty by default — no behaviour change when
-  unset, and not trimmed (nor is a present-but-empty env-var override,
-  which now clears a `config.toml` value), so a publisher's trailing space
-  is preserved. Changing a prefix does not change the stored
-  `{provider, model, dim}` triple pages are keyed by; run `ai-memory embed
-  --force` to re-embed after changing one. See `docs/llm-providers.md`.
+  unset, and not trimmed (nor is a present-but-empty env-var override, which
+  now clears a `config.toml` value), so a publisher's trailing space is
+  preserved. A non-empty `embedding_document_prefix` is folded into the
+  stored embedding identity (`Embedder::model_identity`), so a document
+  prefix change makes retrieval, backfill, and cleanup treat existing pages
+  as stale and re-embed them automatically — an empty prefix keeps the
+  pre-existing identity, so upgrading installs need no migration, and a
+  query-only prefix change never needs a rebuild. See
+  `docs/llm-providers.md`.
 
 ### Fixed
 - `memory_query`'s vector stream called the generic `Embedder::embed`
