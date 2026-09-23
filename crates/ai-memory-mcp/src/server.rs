@@ -1965,6 +1965,44 @@ impl AiMemoryServer {
         )
     }
 
+    /// Diagnostic fields for an EMPTY inbox read whose scope was *inferred*
+    /// (not named by the caller, not bound to the caller's hook session).
+    ///
+    /// An inferred scope can be the wrong inbox: two same-operator agents with
+    /// no session id share one active-project slot, so a no-scope
+    /// `memory_message_pop` / `memory_message_list` can resolve a *different*
+    /// project than the on-start notice / `memory_briefing` counted — the exact
+    /// dead-end where "you have mail" is followed by an empty fetch. Naming the
+    /// resolved scope and how it was inferred turns that silent empty into an
+    /// actionable "re-run with explicit workspace + project". Merged into the
+    /// response only when the read came back empty AND the scope was inferred.
+    async fn inferred_scope_hint(
+        &self,
+        ws: ai_memory_core::WorkspaceId,
+        proj: ai_memory_core::ProjectId,
+        source: ai_memory_store::ScopeSource,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let (ws_name, proj_name) = self.scope_names(ws, proj).await;
+        let hint = format!(
+            "This inbox ({ws_name}/{proj_name}) was resolved by {source} scope, not \
+             named explicitly, so it may not be the inbox you meant. A SessionStart \
+             notice or memory_briefing count is for the project it named; if you \
+             expected mail here, re-run with explicit workspace and project.",
+            source = source.as_str(),
+        );
+        let mut fields = serde_json::Map::new();
+        fields.insert(
+            "resolved_scope".to_owned(),
+            serde_json::json!({ "workspace": ws_name, "project": proj_name }),
+        );
+        fields.insert(
+            "scope_source".to_owned(),
+            serde_json::Value::String(source.as_str().to_owned()),
+        );
+        fields.insert("hint".to_owned(), serde_json::Value::String(hint));
+        fields
+    }
+
     async fn embed_query(&self, query: &str) -> Option<Vec<f32>> {
         let Some(embedder) = &self.embedder else {
             return None;
@@ -4530,8 +4568,8 @@ impl AiMemoryServer {
         OptionalParts(parts): OptionalParts,
     ) -> Result<CallToolResult, McpError> {
         let aps_actor = Self::actor_key_from_parts(Some(&parts));
-        let (ws, proj) = self
-            .effective_ids_for_read_args_with_actor(
+        let ((ws, proj), scope_source) = self
+            .traced_ids_for_read_args(
                 args.workspace.as_deref(),
                 args.project.as_deref(),
                 &aps_actor,
@@ -4558,7 +4596,19 @@ impl AiMemoryServer {
             .list_messages(ws, proj, mailbox, limit)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        ok_json(&serde_json::json!({ "messages": messages }))
+        let mut obj = serde_json::Map::new();
+        // An empty inbox listing under an inferred scope is the same ambiguity
+        // as an empty pop: the caller may be looking at the wrong project.
+        // Only the inbox side can be mis-resolved this way (the outbox is the
+        // caller's own sent mail).
+        if messages.is_empty()
+            && matches!(mailbox, ai_memory_core::MessageBox::Inbox)
+            && scope_source.is_inferred()
+        {
+            obj.extend(self.inferred_scope_hint(ws, proj, scope_source).await);
+        }
+        obj.insert("messages".to_owned(), serde_json::json!(messages));
+        ok_json(&serde_json::Value::Object(obj))
     }
 
     /// Pop (claim exactly once) the next inbox message.
@@ -4581,8 +4631,8 @@ impl AiMemoryServer {
         OptionalParts(parts): OptionalParts,
     ) -> Result<CallToolResult, McpError> {
         let aps_actor = Self::actor_key_from_parts(Some(&parts));
-        let (ws, proj) = self
-            .effective_ids_for_read_args_with_actor(
+        let ((ws, proj), scope_source) = self
+            .traced_ids_for_read_args(
                 args.workspace.as_deref(),
                 args.project.as_deref(),
                 &aps_actor,
@@ -4616,7 +4666,20 @@ impl AiMemoryServer {
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         match popped {
-            None => ok_json(&serde_json::json!({ "message": null })),
+            None => {
+                // A no-scope pop that resolves the shared active-project slot
+                // can land on a different (empty) inbox than the on-start
+                // notice counted — a silent dead-end. When the scope was
+                // inferred, say which inbox was checked and how, so the caller
+                // can re-pop with explicit workspace + project (#847-adjacent
+                // messaging scope divergence).
+                let mut obj = serde_json::Map::new();
+                obj.insert("message".to_owned(), serde_json::Value::Null);
+                if scope_source.is_inferred() {
+                    obj.extend(self.inferred_scope_hint(ws, proj, scope_source).await);
+                }
+                ok_json(&serde_json::Value::Object(obj))
+            }
             Some(message) => {
                 self.notify_operation_observers(admission.as_ref());
                 // Fence the body as untrusted cross-project input, and surface

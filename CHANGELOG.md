@@ -56,6 +56,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capture suppression, like the other context-delivery events. (#840)
 
 ### Fixed
+- `memory_message_pop` and `memory_message_list` no longer return a silent
+  empty result when the inbox scope was *inferred* rather than named. A caller
+  with no explicit `workspace`/`project` and no forwarded hook-session id
+  resolves the shared active-project slot (whichever project published last),
+  so two same-operator agents can have a no-scope pop land on a different inbox
+  than the on-start notice / `memory_briefing` counted — "you have mail"
+  followed by an empty fetch, with no way to tell it was the wrong inbox. An
+  empty read from an inferred scope now reports the `resolved_scope`
+  (workspace + project), the `scope_source`, and a hint to re-run with explicit
+  scope; an explicitly-scoped or session-bound empty read is unchanged. No
+  message is lost — the mis-scoped pop consumes nothing. (#854)
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
   active developer directory is Command Line Tools only: SwiftUI `@State`
   needs the `SwiftUIMacros` plugin shipped with full Xcode, so the script
