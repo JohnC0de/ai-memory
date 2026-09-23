@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Fedora users can install prebuilt x86_64 and aarch64 RPMs from GitHub
-  Releases, with the existing native systemd service assets. (#NNN)
+  Releases, with the existing native systemd service assets. (#858)
 
 ### Fixed
 - `companions/ai-memory-macos/build.sh` no longer fails on machines whose
