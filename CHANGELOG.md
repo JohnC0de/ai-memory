@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Omitted `temperature` for `gpt-6-*` models in the `codex`,
+  `openai-oauth`, `copilot` and `openai` providers. Codex answered GPT-6
+  requests that carried `temperature` with `400 Unsupported parameter:
+  temperature`, which broke consolidation, lint and bootstrap on a
+  provider or fallback configured with `gpt-6-luna`, `gpt-6-sol` or
+  `gpt-6-astra`. The `openai` provider now also sends
+  `max_completion_tokens` for GPT-6 and no longer applies its local
+  16,384-token cap to it, matching `gpt-5*`. (#851)
 - `memory_message_pop` and `memory_message_list` no longer return a silent
   empty result when the inbox scope was *inferred* rather than named. A caller
   with no explicit `workspace`/`project` and no forwarded hook-session id
