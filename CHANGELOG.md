@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A Windows service running as `LocalSystem` over a user-owned data
+  directory no longer breaks the wiki git history silently. libgit2's
+  dubious-ownership guard (CVE-2022-24765) fails every wiki commit with
+  `code=Owner` when the process account does not own the repository, but
+  the failure was WARN-only, so capture and search kept working while no
+  wiki checkpoint was ever committed. The startup baseline checkpoint now
+  surfaces an owner-check failure at ERROR with the remedy (run the
+  service as the owning user), and `docs/windows.md` Scenario E documents
+  running the service under a `<serviceaccount>`, corrects the claim that
+  only the data directory is account-sensitive, and notes the WinSW
+  error-1069 / stale-password gotcha for Microsoft-account / PIN / Hello
+  users. The owner check itself is deliberately left enabled. (#872)
 - A Windows folder no longer splits into two projects. The hook router
   derived a project's *name* from the cwd after
   `normalize_project_path_key` had ASCII-lowercased the whole
