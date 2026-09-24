@@ -12,11 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`docs/examples/jev-reranker-adapter/jev_rerank_shim.py`) that serves the
   `AI_MEMORY_RERANKER=llm` request leg from a Jev `/v1/systemone` judge
   endpoint while reverse-proxying consolidation/lint/bootstrap traffic to
-  the configured provider unchanged. On a 102-query golden set the judge
-  matched the hosted reranker's hit@1/MRR/NDCG@10 (0.778/0.838/0.873 vs
-  0.778/0.840/0.875) at 0.205 s mean latency instead of 20.2 s — the
-  hosted mean sat on the server's 20 s completion timeout, which made the
-  reranker stall every query before falling back in production.
+  the configured provider unchanged. In the contributor's own 102-query
+  golden-set benchmark the judge matched the hosted reranker's
+  hit@1/MRR/NDCG@10 (0.778/0.838/0.873 vs 0.778/0.840/0.875) at 0.205 s
+  mean latency instead of 20.2 s — in that run the hosted mean sat on the
+  server's 20 s completion timeout, which made the reranker stall every
+  query before falling back. (#873)
 
 ### Fixed
 - The Linux/macOS Docker wrapper now keeps its native host client in
