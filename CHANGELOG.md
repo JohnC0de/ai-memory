@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Isolated the pre-push test process from Git's repository environment and
   global/system configuration so fixture commands use their own repositories.
   Existing installations need to run `scripts/install-git-hooks.sh` again. (#824)
+- `memory_query` now embeds the search text with `embed_query` rather than
+  the generic `embed()` method. Google's embedder implements `embed()` as
+  `embed_document` (`RETRIEVAL_DOCUMENT`), the same task type used when
+  indexing wiki pages, so hybrid search compared a document vector to
+  document vectors and the vector stream could not separate query from
+  passage. Indexed writes are unchanged; only the query-side helper moves
+  onto `RETRIEVAL_QUERY`. Symmetric embedders (OpenAI, Voyage, local) keep
+  the same vector they already returned from `embed()`. (#861)
 - Auto-improve review no longer stages a proposal whose LLM-produced page
   path contains a Windows-illegal character (e.g. a `:` copied from a
   conventional-commit subject). That path passed the deliberately tolerant
