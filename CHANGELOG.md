@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A Windows folder no longer splits into two projects. The hook router
+  derived a project's *name* from the cwd after
+  `normalize_project_path_key` had ASCII-lowercased the whole
+  drive-letter/UNC path — basename included — so a session in
+  `D:\...\Default Project` was captured under `default project` while the
+  CLI (which keeps the raw basename) used `Default Project`. Because
+  `get_or_create_project` matches names case-sensitively, one folder
+  minted two projects. The router now takes the name from the raw cwd; the
+  cache key and cwd-prefix match keep the case-folded path, so #806 handoff
+  stickiness is unaffected. (#871)
 - Auto-improve review no longer stages a proposal whose LLM-produced page
   path contains a Windows-illegal character (e.g. a `:` copied from a
   conventional-commit subject). That path passed the deliberately tolerant
