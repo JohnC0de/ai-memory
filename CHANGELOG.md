@@ -159,6 +159,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event: their `git` lookups set `windowsHide`. The repo-root project lookup
   behind those spawns is memoized per cwd instead of running two synchronous
   `git` processes on every event. (#863)
+- Shell hooks on macOS no longer corrupt non-ASCII characters in the query
+  string. `/bin/sh` there is bash 3.2, which sign-extends bytes >= 0x80, so
+  `ai_memory_url_encode` sent `é` as `%FFFFFFFFFFFFFFC3%FFFFFFFFFFFFFFA9`
+  instead of `%C3%A9`. An accented cwd reached the server as a different
+  path, and Cursor events and the session-start handoff lookup both use the
+  query `cwd`. (#877)
 
 ## [2.4.0] - 2026-09-21
 
