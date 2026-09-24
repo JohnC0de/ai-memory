@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `docs/jev-reranker-adapter.md` documents a stdlib-only adapter
+  (`docs/examples/jev-reranker-adapter/jev_rerank_shim.py`) that serves the
+  `AI_MEMORY_RERANKER=llm` request leg from a Jev `/v1/systemone` judge
+  endpoint while reverse-proxying consolidation/lint/bootstrap traffic to
+  the configured provider unchanged. On a 102-query golden set the judge
+  matched the hosted reranker's hit@1/MRR/NDCG@10 (0.778/0.838/0.873 vs
+  0.778/0.840/0.875) at 0.205 s mean latency instead of 20.2 s — the
+  hosted mean sat on the server's 20 s completion timeout, which made the
+  reranker stall every query before falling back in production.
+
 ### Fixed
 - The Linux/macOS Docker wrapper now keeps its native host client in
   `${XDG_DATA_HOME:-~/.local/share}/ai-memory/native-runner` instead of
