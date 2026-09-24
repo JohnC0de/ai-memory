@@ -80,6 +80,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checksum block, which concatenates every platform's file. The zip's smoke
   test now requires LF rather than tolerating either, so the format the
   release claims is the format it ships. (#838)
+- Shell hooks no longer pin a CPU core for minutes on a large payload. The
+  `hooks/_lib.sh` extractors for `cwd`/`workspacePaths`/`workspace_roots`,
+  the session id, and Antigravity's `invocationNum` located each key with
+  `${payload#*"key"}`, which is quadratic in the payload size under dash and
+  bash: a 200 KB Cursor `postToolUse` event spent minutes in
+  `ai_memory_extract_cwd`, and concurrent hooks stayed at 100% CPU before
+  ever reaching the POST. A shared `ai_memory_after_key` helper now finds the
+  first occurrence with one linear `awk` pass (about 50 ms at 200 KB) and
+  feeds the unchanged `sed` parsing, so the extracted values are the same as
+  before. (#870)
 
 ## [2.4.0] - 2026-09-21
 
