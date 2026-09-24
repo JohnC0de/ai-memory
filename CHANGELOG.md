@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query before falling back. (#873)
 
 ### Fixed
+- On Windows, OpenCode 1 and 2 sessions are found again from their checkout:
+  OpenCode records a session's directory with forward slashes
+  (`C:/Users/me/repo`), so matching only the backslash checkout path found
+  none. `ai-memory doctor` reported `0 local` for OpenCode while it captured
+  sessions there, and `ai-memory run` / `show` could neither discover nor list
+  a native OpenCode session to resume. (#882)
 - The Linux/macOS Docker wrapper now keeps its native host client in
   `${XDG_DATA_HOME:-~/.local/share}/ai-memory/native-runner` instead of
   `~/.cache/ai-memory/native-runner`. `ai-memory run` auto-wires hooks whose
