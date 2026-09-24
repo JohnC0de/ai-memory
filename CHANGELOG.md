@@ -154,6 +154,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first occurrence with one linear `awk` pass (about 50 ms at 200 KB) and
   feeds the unchanged `sed` parsing, so the extracted values are the same as
   before. (#870)
+- The generated TypeScript integrations (OpenCode 1 and 2, OMP, Pi,
+  OpenClaw) no longer flash a console window on Windows for every captured
+  event: their `git` lookups set `windowsHide`. The repo-root project lookup
+  behind those spawns is memoized per cwd instead of running two synchronous
+  `git` processes on every event. (#863)
 
 ## [2.4.0] - 2026-09-21
 
