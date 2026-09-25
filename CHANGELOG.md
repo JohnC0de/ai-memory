@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query before falling back. (#873)
 
 ### Fixed
+- A manual `memory_consolidate` now reconciles the session's durable
+  consolidation job row. The MCP handler wrote the page directly through the
+  consolidator without touching `session_consolidation_jobs`, so a session
+  whose automatic SessionEnd job had reached the terminal `failed` state (that
+  the worker never re-claims) kept showing `failed` even though the operator
+  had just consolidated it. After a successful, non-dry consolidate the handler
+  flips a `failed`/`pending`/`superseded` row for the session to `completed`; a
+  live `running` lease is never touched, so a concurrent automatic worker
+  attempt is left to settle its own row. (#890)
 - `ai-memory run`'s auto-wire no longer overwrites an installed session-aware
   Claude Code MCP bridge with the static HTTP registration. The auto-wire
   sentinel is keyed by client version, so the MCP step re-ran on every upgrade
