@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `[consolidation] input_token_safety_margin` (float, default `0.8`, validated
+  to `(0.0, 1.0]`) scales the approximate char-count input budget. The
+  `max_input_tokens` budget uses a flat chars-per-token heuristic that
+  under-budgets denser corpora — pt-BR text and source code tokenize at fewer
+  chars per token than English and could overshoot a provider's real input
+  limit by ~40%. The default tightens the common case modestly while leaving
+  such corpora headroom; lower it further for a mostly non-English or code
+  corpus. `max_input_tokens` is now documented as an approximate heuristic in
+  the config reference. (#884)
 - `docs/jev-reranker-adapter.md` documents a stdlib-only adapter
   (`docs/examples/jev-reranker-adapter/jev_rerank_shim.py`) that serves the
   `AI_MEMORY_RERANKER=llm` request leg from a Jev `/v1/systemone` judge
@@ -49,6 +58,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path — never fired for a real session. A shared recognizer now maps both
   spellings, drops the labels from the handoff tool list and the title fallback,
   and drives the file-activity warning from either. (#895)
+- Generated rule slugs (`_rules/<slug>.md`) now fold Latin diacritics to ASCII
+  instead of turning each accented letter into a hyphen: `estável` slugs as
+  `estavel` (was `est-vel`) and `retenção` as `retencao` (was `reten-o`). Long
+  titles are also truncated at a word boundary (the last hyphen inside the
+  60-char budget) rather than mid-word. Uses the icu_normalizer NFD
+  decomposition ai-memory-core already depends on; no new dependency. (#886)
+- Multi-page consolidation now stores page paths with a `.md` extension.
+  The LLM returns a bare path for a non-rule page (`decisions/smart-model-luna`),
+  and the shared path sanitizer passed it through verbatim, so the page landed
+  extensionless and read back as a non-portable wiki path. The sanitizer now
+  appends `.md` to the filename component when it is missing (idempotent,
+  case-insensitive), fixing the non-rule consolidation, bootstrap, and
+  auto-improve front doors at once. (#885)
 - `ai-memory run`'s auto-wire no longer overwrites an installed session-aware
   Claude Code MCP bridge with the static HTTP registration. The auto-wire
   sentinel is keyed by client version, so the MCP step re-ran on every upgrade
