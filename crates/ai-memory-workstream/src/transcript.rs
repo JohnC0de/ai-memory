@@ -232,6 +232,36 @@ pub async fn list_native_sessions(
     Ok(sessions)
 }
 
+/// Whether the native store holds `native_session_id` for this checkout.
+/// [`native_session_exists`] answers for the store; OpenCode keeps every
+/// checkout's sessions in one database, so there the recorded directory must
+/// match `cwd` too.
+pub fn native_session_in_checkout(
+    harness: ManagedHarness,
+    home: &Path,
+    cwd: &Path,
+    session_dir: Option<&Path>,
+    native_session_id: &str,
+) -> Result<bool> {
+    let table = match harness {
+        ManagedHarness::OpenCode => "session",
+        ManagedHarness::OpenCode2 => "session_v2",
+        _ => return native_session_exists(harness, home, cwd, session_dir, native_session_id),
+    };
+    let db = opencode_db(home, session_dir);
+    if !db.is_file() {
+        return Ok(false);
+    }
+    let connection = Connection::open_with_flags(
+        &db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let mut statement = connection.prepare(&format!(
+        "SELECT 1 FROM {table} WHERE id = ?1 AND directory = ?2"
+    ))?;
+    Ok(statement.exists(params![native_session_id, cwd.to_string_lossy()])?)
+}
+
 /// Check whether one exact native session still exists in the harness's
 /// read-only transcript store. `Ok(false)` means the resume target is
 /// definitely absent; store access or schema failures remain errors so callers
@@ -3743,6 +3773,50 @@ mod tests {
             )
             .unwrap()
         );
+    }
+
+    /// OpenCode keeps every checkout's sessions in one database, so a session
+    /// is this checkout's only when its recorded directory matches; other
+    /// harnesses answer as `native_session_exists` does.
+    #[test]
+    fn native_session_in_checkout_checks_the_opencode_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path().join("repo");
+        let other = temp.path().join("other");
+        let store = temp.path().join("opencode");
+        fs::create_dir_all(&store).unwrap();
+        let connection = Connection::open(store.join("opencode.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE session(id TEXT PRIMARY KEY, directory TEXT NOT NULL, \
+                 time_updated INTEGER NOT NULL); \
+                 CREATE TABLE session_v2(id TEXT PRIMARY KEY, directory TEXT NOT NULL, \
+                 time_updated INTEGER NOT NULL);",
+            )
+            .unwrap();
+        for table in ["session", "session_v2"] {
+            for (id, dir) in [("here", &cwd), ("elsewhere", &other)] {
+                connection
+                    .execute(
+                        &format!("INSERT INTO {table} VALUES (?1, ?2, 1)"),
+                        params![id, dir.to_string_lossy()],
+                    )
+                    .unwrap();
+            }
+        }
+        for harness in [ManagedHarness::OpenCode, ManagedHarness::OpenCode2] {
+            let in_checkout = |id: &str| {
+                native_session_in_checkout(harness, temp.path(), &cwd, Some(&store), id).unwrap()
+            };
+            assert!(in_checkout("here"), "{harness:?}");
+            assert!(!in_checkout("elsewhere"), "{harness:?}");
+            assert!(!in_checkout("missing"), "{harness:?}");
+            assert!(
+                native_session_exists(harness, temp.path(), &cwd, Some(&store), "elsewhere")
+                    .unwrap(),
+                "{harness:?}: the store holds it"
+            );
+        }
     }
 
     #[tokio::test]
