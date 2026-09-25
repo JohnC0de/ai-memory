@@ -599,7 +599,11 @@ prefixed `AI_MEMORY_*`.
 
 ```toml
 bind = "127.0.0.1:49374"
-log_level = "info"
+log_level = "info"                 # default filter also pins `rmcp=warn` (the MCP SDK's
+                                   # per-request info logs) and drops the 30s reconcile
+                                   # summary to debug (#894). Restore either via log_level
+                                   # (e.g. "info,rmcp=info", "debug") or RUST_LOG;
+                                   # `tracing_appender=warn` stays forced (feedback-loop guard)
 tcp_keepalive_secs = 60            # idle time before TCP keepalive probes an accepted `serve`
                                    # connection; reaps sockets left half-open by a dead peer
                                    # (laptop sleep, VPN flap) that would otherwise leak fds

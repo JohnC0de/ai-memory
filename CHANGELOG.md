@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server's 20 s completion timeout, which made the reranker stall every
   query before falling back. (#873)
 
+### Changed
+- Quieted the default server log: the reconciliation-pass summary that fired
+  every 30 s regardless of activity dropped from `info` to `debug`, and the
+  default log filter now pins the external `rmcp` MCP SDK to `warn` (its
+  per-request lifecycle logging at `info` was the other half of a near-empty
+  server's log). Both are restorable through `log_level` (e.g.
+  `"info,rmcp=info"` or `"debug"`) or `RUST_LOG`; the `tracing_appender=warn`
+  feedback-loop guard stays non-overridable. (#894)
+
 ### Fixed
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
@@ -29,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flips a `failed`/`pending`/`superseded` row for the session to `completed`; a
   live `running` lease is never touched, so a concurrent automatic worker
   attempt is left to settle its own row. (#890)
+- Tool-family labels no longer leak into automatic handoffs and session-page
+  titles, and the file-activity handoff warning fires again. Every closed-tool
+  agent stores a call's title as `tool file` / `tool non-file` / … (a partition
+  of the calls, not a tool name); these were surfacing verbatim as `Tools used:
+  tool file, tool non-file` in handoffs and, for a session whose only non-prompt
+  observation was such a call, as the page title. The same spelling meant the
+  "session ended without a normal stop while working with files" heuristic —
+  which only matched the bare `file` spelling of the minority reserved-protocol
+  path — never fired for a real session. A shared recognizer now maps both
+  spellings, drops the labels from the handoff tool list and the title fallback,
+  and drives the file-activity warning from either. (#895)
 - `ai-memory run`'s auto-wire no longer overwrites an installed session-aware
   Claude Code MCP bridge with the static HTTP registration. The auto-wire
   sentinel is keyed by client version, so the MCP step re-ran on every upgrade
