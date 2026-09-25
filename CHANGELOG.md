@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query before falling back. (#873)
 
 ### Fixed
+- Tool-family labels no longer leak into automatic handoffs and session-page
+  titles, and the file-activity handoff warning fires again. Every closed-tool
+  agent stores a call's title as `tool file` / `tool non-file` / … (a partition
+  of the calls, not a tool name); these were surfacing verbatim as `Tools used:
+  tool file, tool non-file` in handoffs and, for a session whose only non-prompt
+  observation was such a call, as the page title. The same spelling meant the
+  "session ended without a normal stop while working with files" heuristic —
+  which only matched the bare `file` spelling of the minority reserved-protocol
+  path — never fired for a real session. A shared recognizer now maps both
+  spellings, drops the labels from the handoff tool list and the title fallback,
+  and drives the file-activity warning from either. (#895)
 - `ai-memory run`'s auto-wire no longer overwrites an installed session-aware
   Claude Code MCP bridge with the static HTTP registration. The auto-wire
   sentinel is keyed by client version, so the MCP step re-ran on every upgrade
