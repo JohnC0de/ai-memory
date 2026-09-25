@@ -56,8 +56,15 @@ pub(crate) fn slugify_page_path(raw: &str) -> String {
         .collect();
     // Append the `.md` extension when the model omitted it on the filename
     // component (#885). The check is case-insensitive so `NAME.MD` is not
-    // double-extended, keeping the whole operation idempotent.
+    // double-extended, keeping the whole operation idempotent. Skip an empty
+    // final component: an empty or trailing-slash path has no filename to
+    // extend, and fabricating `.md` there would turn a missing/invalid path
+    // into a plausible-looking one that slips past the callers' own
+    // empty-path rejection (auto-improve reported `unsupported_path_prefix`
+    // instead of `invalid_path`). An empty path stays empty and is rejected
+    // upstream as before.
     if let Some(last) = segments.last_mut()
+        && !last.is_empty()
         && !last.to_ascii_lowercase().ends_with(".md")
     {
         last.push_str(".md");
@@ -111,5 +118,16 @@ mod tests {
             "decisions/SHOUTING.MD",
             "an existing .MD extension is recognized case-insensitively"
         );
+    }
+
+    #[test]
+    fn slugify_page_path_does_not_fabricate_a_filename_from_an_empty_path() {
+        // #885 regression: appending `.md` to an empty final component would
+        // turn a missing/invalid path into `.md` (or `dir/.md`), which slips
+        // past a caller's own empty-path rejection. An empty path stays empty,
+        // and a trailing slash keeps its empty final component, so the missing
+        // filename is still rejected upstream (auto-improve `invalid_path`).
+        assert_eq!(slugify_page_path(""), "");
+        assert_eq!(slugify_page_path("decisions/"), "decisions/");
     }
 }
