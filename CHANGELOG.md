@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query before falling back. (#873)
 
 ### Fixed
+- Multi-page consolidation now stores page paths with a `.md` extension.
+  The LLM returns a bare path for a non-rule page (`decisions/smart-model-luna`),
+  and the shared path sanitizer passed it through verbatim, so the page landed
+  extensionless and read back as a non-portable wiki path. The sanitizer now
+  appends `.md` to the filename component when it is missing (idempotent,
+  case-insensitive), fixing the non-rule consolidation, bootstrap, and
+  auto-improve front doors at once. (#885)
 - `ai-memory run`'s auto-wire no longer overwrites an installed session-aware
   Claude Code MCP bridge with the static HTTP registration. The auto-wire
   sentinel is keyed by client version, so the MCP step re-ran on every upgrade

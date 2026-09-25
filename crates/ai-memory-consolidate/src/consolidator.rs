@@ -2124,6 +2124,36 @@ mod tests {
     }
 
     #[test]
+    fn build_update_appends_md_to_bare_non_rule_path() {
+        // #885: the LLM returns a multi-page path with no extension
+        // (`decisions/smart-model-luna`). The non-rule branch routes it
+        // through `slugify_page_path`, which must land it as a portable
+        // `.md` page rather than storing it extensionless.
+        let update = crate::types::ConsolidatedPageUpdate {
+            path: "decisions/smart-model-luna".into(),
+            tier: Tier::Semantic,
+            kind: crate::types::PageKind::Fact,
+            title: "Smart model Luna".into(),
+            body_markdown: "body".into(),
+            summary: None,
+            tags: Vec::new(),
+            slot_kind: SlotKind::State,
+            relations: Relations::default(),
+            entities: Vec::new(),
+        };
+        let (req, _) = build_update(
+            WorkspaceId::new(),
+            ProjectId::new(),
+            &update,
+            true,
+            &ai_memory_core::ActorContext::anonymous(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(req.path.as_str(), "decisions/smart-model-luna.md");
+    }
+
+    #[test]
     fn build_update_stamps_request_actor_and_author() {
         let update = crate::types::ConsolidatedPageUpdate {
             path: "notes/x.md".into(),
