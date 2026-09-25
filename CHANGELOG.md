@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query before falling back. (#873)
 
 ### Fixed
+- Generated rule slugs (`_rules/<slug>.md`) now fold Latin diacritics to ASCII
+  instead of turning each accented letter into a hyphen: `estável` slugs as
+  `estavel` (was `est-vel`) and `retenção` as `retencao` (was `reten-o`). Long
+  titles are also truncated at a word boundary (the last hyphen inside the
+  60-char budget) rather than mid-word. Uses the icu_normalizer NFD
+  decomposition ai-memory-core already depends on; no new dependency. (#886)
 - Multi-page consolidation now stores page paths with a `.md` extension.
   The LLM returns a bare path for a non-rule page (`decisions/smart-model-luna`),
   and the shared path sanitizer passed it through verbatim, so the page landed

@@ -1455,14 +1455,33 @@ fn indent_for_prompt(s: &str) -> String {
 
 /// ASCII-slug a rule title for the `_rules/<slug>.md` path.
 ///
-/// Lower-cases, replaces runs of non-`[a-z0-9]` with `-`, trims
-/// leading/trailing hyphens, and caps at 60 chars. Falls back to
-/// `rule` when the input has no alphanumerics (e.g. a non-Latin
-/// title) so we always produce a valid PagePath.
+/// Folds Latin diacritics to ASCII (NFD-decompose, drop the combining
+/// marks), lower-cases, replaces runs of non-`[a-z0-9]` with `-`, trims
+/// leading/trailing hyphens, and caps at 60 chars at a word boundary.
+/// Falls back to `rule` when the input has no folding-surviving
+/// alphanumerics (e.g. a CJK-only title) so we always produce a valid
+/// PagePath.
+///
+/// Diacritic folding (#886) is why `estável`/`retenção` slug as
+/// `estavel`/`retencao` instead of `est-vel`/`reten-o`: without the fold
+/// each accented letter is a non-ASCII scalar that the run-collapse turns
+/// into a `-`, splitting the word. The truncation cuts at the last hyphen
+/// within the 60-char budget so a long title ends on a whole word rather
+/// than mid-word. Non-decomposable Latin-1 letters (ß, ø, æ) still fall to
+/// `-`, which is acceptable; all pt-BR letters decompose to ASCII.
 fn slugify_for_rule(title: &str) -> String {
-    let mut out = String::with_capacity(title.len());
+    // NFD decomposition splits `é` into `e` + U+0301 (combining acute),
+    // `ç` into `c` + U+0327, etc. Reuses ai-memory-core's icu_normalizer.
+    let decomposed = icu_normalizer::DecomposingNormalizer::new_nfd().normalize(title);
+    let mut out = String::with_capacity(decomposed.len());
     let mut prev_dash = true; // leading dashes get folded
-    for c in title.chars() {
+    for c in decomposed.chars() {
+        // Drop the combining marks NFD left behind (the Combining
+        // Diacritical Marks block), rather than folding them to a `-`,
+        // so the base letter stands alone: `e` + U+0301 -> `e`.
+        if ('\u{0300}'..='\u{036F}').contains(&c) {
+            continue;
+        }
         let lower = c.to_ascii_lowercase();
         if lower.is_ascii_alphanumeric() {
             out.push(lower);
@@ -1479,7 +1498,13 @@ fn slugify_for_rule(title: &str) -> String {
         return "rule".into();
     }
     if out.len() > 60 {
-        out.truncate(60);
+        // `out` is ASCII here, so byte index 60 is a char boundary. Cut at
+        // the last hyphen inside the window to end on a whole word; only
+        // hard-cut at 60 when the window holds no hyphen (one long token).
+        match out[..60].rfind('-') {
+            Some(idx) => out.truncate(idx),
+            None => out.truncate(60),
+        }
         while out.ends_with('-') {
             out.pop();
         }
@@ -1804,6 +1829,45 @@ mod tests {
         let slug = slugify_for_rule(&long);
         assert!(slug.len() <= 60);
         assert!(!slug.ends_with('-'));
+    }
+
+    /// #886: Latin diacritics fold to ASCII instead of splitting the word
+    /// into a hyphen (`estável` -> `estavel`, not `est-vel`).
+    #[test]
+    fn slugify_folds_latin_diacritics() {
+        assert_eq!(slugify_for_rule("Modelo estável"), "modelo-estavel");
+        assert_eq!(
+            slugify_for_rule("Política de retenção"),
+            "politica-de-retencao"
+        );
+        // Every pt-BR accented letter decomposes to ASCII.
+        assert_eq!(
+            slugify_for_rule("á é í ó ú â ê ô ã õ ç à ü"),
+            "a-e-i-o-u-a-e-o-a-o-c-a-u"
+        );
+    }
+
+    /// #886: a title longer than 60 chars is cut at a hyphen (word
+    /// boundary), not mid-word.
+    #[test]
+    fn slugify_truncates_at_word_boundary() {
+        let title = "aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh";
+        let slug = slugify_for_rule(title);
+        assert!(slug.len() <= 60);
+        assert!(!slug.ends_with('-'));
+        // The cut lands on the last whole word inside the budget, dropping
+        // the partial `gggggggg` rather than slicing it.
+        assert_eq!(
+            slug,
+            "aaaaaaaa-bbbbbbbb-cccccccc-dddddddd-eeeeeeee-ffffffff"
+        );
+    }
+
+    /// #886: a CJK-only title still folds to nothing and falls back to the
+    /// static slug — diacritic folding must not resurrect it.
+    #[test]
+    fn slugify_cjk_still_falls_back() {
+        assert_eq!(slugify_for_rule("中文标题"), "rule");
     }
 
     fn update_with_summary(summary: Option<&str>) -> crate::types::ConsolidatedPageUpdate {
